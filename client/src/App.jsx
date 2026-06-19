@@ -240,7 +240,7 @@ export default function App() {
         </div>
       )}
 
-      {gameState.buzzerActive && !activeCell && (
+      {gameState.buzzerActive && !activeCell && gameState.buzzOrder.length === 0 && (
         <div className="buzzer-active-banner">
           BUZZER ACTIVE — Press SPACE to buzz in!
         </div>

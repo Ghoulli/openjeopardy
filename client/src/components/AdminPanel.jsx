@@ -261,6 +261,11 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
               <button className="admin-btn green" onClick={() => send({ type: 'activate_buzzer' })}>
                 ✓ Activate Buzzer
               </button>
+              {gameState.buzzerActive && (
+                <button className="admin-btn red" onClick={() => send({ type: 'stop_buzzer' })}>
+                  ■ Stop Buzzer
+                </button>
+              )}
               <button className="admin-btn orange" onClick={() => send({ type: 'reset_buzzers' })}>
                 ↺ Reset Buzzers
               </button>
@@ -338,6 +343,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 onClose={() => send({ type: 'close_question' })}
                 onActivateBuzzer={() => send({ type: 'activate_buzzer' })}
                 onResetBuzzers={() => send({ type: 'reset_buzzers' })}
+                onStopBuzzer={() => send({ type: 'stop_buzzer' })}
                 onMarkAnswered={() => send({ type: 'mark_answered' })}
               />
             )}

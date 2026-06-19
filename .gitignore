@@ -1,1 +1,24 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Built client — rebuild with the command in CLAUDE.md before running
+client/dist/
+
+# Uploaded images (runtime data, not source)
+server/uploads/
+
+# Runtime state that may be persisted to disk
+server/game-state.json
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -4,7 +4,7 @@ import BuzzerDisplay from './BuzzerDisplay'
 export default function QuestionModal({
   cell, pointValue, category, isAdmin,
   buzzOrder, buzzerActive,
-  onClose, onActivateBuzzer, onResetBuzzers, onMarkAnswered,
+  onClose, onActivateBuzzer, onResetBuzzers, onStopBuzzer, onMarkAnswered,
 }) {
   const [showAnswer, setShowAnswer] = useState(false)
 
@@ -40,7 +40,7 @@ export default function QuestionModal({
         )}
 
         <div className="modal-buzzer-section">
-          {buzzerActive && (
+          {buzzerActive && (!buzzOrder || buzzOrder.length === 0) && (
             <div className="modal-buzzer-active">
               BUZZER ACTIVE — Players can buzz in!
             </div>
@@ -60,6 +60,11 @@ export default function QuestionModal({
             <button className="btn-ctrl green" onClick={onActivateBuzzer}>
               ✓ Activate Buzzer
             </button>
+            {buzzerActive && (
+              <button className="btn-ctrl red" onClick={onStopBuzzer}>
+                ■ Stop Buzzer
+              </button>
+            )}
             <button className="btn-ctrl orange" onClick={onResetBuzzers}>
               ↺ Reset Buzzers
             </button>

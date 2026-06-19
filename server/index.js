@@ -279,6 +279,13 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      case 'stop_buzzer': {
+        if (!client.isAdmin) return;
+        gameState.buzzerActive = false;
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
       case 'set_active_cell': {
         if (!client.isAdmin) return;
         if (msg.cell == null) {
