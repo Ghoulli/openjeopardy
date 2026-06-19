@@ -6,6 +6,7 @@ import BuzzerDisplay from './components/BuzzerDisplay'
 import FinalJeopardyPage from './components/FinalJeopardyPage'
 import Scoreboard from './components/Scoreboard'
 import SetupView from './components/SetupView'
+import ProfileModal from './components/ProfileModal'
 import { WS_URL } from './config'
 
 export default function App() {
@@ -15,9 +16,16 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [wsStatus, setWsStatus] = useState('connecting')
   const [adminError, setAdminError] = useState('')
+  const [authError, setAuthError] = useState('')
   const [notYourTurn, setNotYourTurn] = useState(false)
-  const notYourTurnTimer = useRef(null)
+  const [playerUsername, setPlayerUsername] = useState(null)
+  const [playerStats, setPlayerStats] = useState(null)
+  const [playerAchievements, setPlayerAchievements] = useState([])
+  const [showProfile, setShowProfile] = useState(false)
+  const [newAchievements, setNewAchievements] = useState([])
 
+  const notYourTurnTimer = useRef(null)
+  const achToastTimer = useRef(null)
   const wsRef = useRef(null)
   const reconnectRef = useRef(null)
   const isAdminRef = useRef(false)
@@ -36,13 +44,13 @@ export default function App() {
       setWsStatus('connected')
       clearTimeout(reconnectRef.current)
 
-      const savedToken = sessionStorage.getItem('adminToken')
-      const savedName = sessionStorage.getItem('playerName')
+      const savedAdminToken = sessionStorage.getItem('adminToken')
+      const savedPlayerToken = localStorage.getItem('playerToken')
 
-      if (sessionStorage.getItem('isAdmin') === 'true' && savedToken) {
-        ws.send(JSON.stringify({ type: 'admin_rejoin', token: savedToken }))
-      } else if (savedName) {
-        ws.send(JSON.stringify({ type: 'join', name: savedName }))
+      if (sessionStorage.getItem('isAdmin') === 'true' && savedAdminToken) {
+        ws.send(JSON.stringify({ type: 'admin_rejoin', token: savedAdminToken }))
+      } else if (savedPlayerToken) {
+        ws.send(JSON.stringify({ type: 'player_rejoin', token: savedPlayerToken }))
       }
     }
 
@@ -62,8 +70,27 @@ export default function App() {
           setView('admin')
           if (msg.token) sessionStorage.setItem('adminToken', msg.token)
           break
+        case 'player_auth':
+          localStorage.setItem('playerToken', msg.token)
+          setPlayerUsername(msg.username)
+          setPlayerStats(msg.stats)
+          setPlayerAchievements(msg.achievements || [])
+          setAuthError('')
+          break
+        case 'stats_updated':
+          setPlayerStats(msg.stats)
+          setPlayerAchievements(msg.achievements || [])
+          break
+        case 'achievements_unlocked':
+          setPlayerAchievements(prev => {
+            const existingIds = new Set(prev.map(a => a.id))
+            return [...prev, ...msg.achievements.filter(a => !existingIds.has(a.id))]
+          })
+          setNewAchievements(msg.achievements)
+          clearTimeout(achToastTimer.current)
+          achToastTimer.current = setTimeout(() => setNewAchievements([]), 5000)
+          break
         case 'error':
-          // If the admin token expired, clear stale session and go back to login
           if (msg.message?.includes('Session expired') || msg.message?.includes('expired')) {
             sessionStorage.removeItem('adminToken')
             sessionStorage.removeItem('isAdmin')
@@ -71,6 +98,13 @@ export default function App() {
             setView('setup')
           }
           setAdminError(msg.message)
+          break
+        case 'auth_error':
+          if (msg.message?.includes('expired') || msg.message?.includes('not found')) {
+            localStorage.removeItem('playerToken')
+            setView('setup')
+          }
+          setAuthError(msg.message)
           break
       }
     }
@@ -87,6 +121,7 @@ export default function App() {
     connect()
     return () => {
       clearTimeout(reconnectRef.current)
+      clearTimeout(achToastTimer.current)
       wsRef.current?.close()
     }
   }, [connect])
@@ -113,33 +148,39 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [gameState?.buzzerActive, send])
 
-  const handlePlayerJoin = name => {
-    sessionStorage.setItem('playerName', name)
-    sessionStorage.removeItem('isAdmin')
-    send({ type: 'join', name })
+  const handlePlayerLogin = (username, password) => {
+    setAuthError('')
+    send({ type: 'login_player', username, password })
+  }
+
+  const handlePlayerRegister = (username, password) => {
+    setAuthError('')
+    send({ type: 'register_player', username, password })
   }
 
   const handleAdminLogin = password => {
     setAdminError('')
     sessionStorage.setItem('isAdmin', 'true')
-    // Do NOT store the password — a token is returned on success and stored instead
     send({ type: 'admin_join', password })
   }
 
   const handleLeave = () => {
     sessionStorage.clear()
+    localStorage.removeItem('playerToken')
     setIsAdmin(false)
     setPlayerId(null)
+    setPlayerUsername(null)
+    setPlayerStats(null)
+    setPlayerAchievements([])
+    setShowProfile(false)
+    setNewAchievements([])
     setView('setup')
   }
 
-  const myPlayerName = sessionStorage.getItem('playerName') || null
-
   function handlePlayerCellClick(col, row) {
     if (!gameState) return
-    const isMyTurn = myPlayerName && myPlayerName === gameState.activePlayerName
+    const isMyTurn = playerUsername && playerUsername === gameState.activePlayerName
     if (!isMyTurn) {
-      // Show "not your turn" toast
       clearTimeout(notYourTurnTimer.current)
       setNotYourTurn(true)
       notYourTurnTimer.current = setTimeout(() => setNotYourTurn(false), 2200)
@@ -154,11 +195,12 @@ export default function App() {
   if (!gameState) {
     return (
       <SetupView
-        onPlayerJoin={handlePlayerJoin}
+        onPlayerLogin={handlePlayerLogin}
+        onPlayerRegister={handlePlayerRegister}
         onAdminLogin={handleAdminLogin}
+        authError={authError}
         adminError={adminError}
         wsStatus={wsStatus}
-        sessionActive={false}
       />
     )
   }
@@ -170,11 +212,12 @@ export default function App() {
   if (view === 'setup') {
     return (
       <SetupView
-        onPlayerJoin={handlePlayerJoin}
+        onPlayerLogin={handlePlayerLogin}
+        onPlayerRegister={handlePlayerRegister}
         onAdminLogin={handleAdminLogin}
+        authError={authError}
         adminError={adminError}
         wsStatus={wsStatus}
-        sessionActive={!!gameState.currentSessionId}
       />
     )
   }
@@ -197,8 +240,8 @@ export default function App() {
     : null
 
   const pendingReq = gameState.pendingCellRequest
-  const isMyTurn = myPlayerName && myPlayerName === gameState.activePlayerName
-  const myPendingRequest = pendingReq && pendingReq.playerName === myPlayerName
+  const isMyTurn = playerUsername && playerUsername === gameState.activePlayerName
+  const myPendingRequest = pendingReq && pendingReq.playerName === playerUsername
 
   return (
     <div className="app">
@@ -209,7 +252,7 @@ export default function App() {
           isAdmin={false}
           onCellClick={handlePlayerCellClick}
           onFinalClick={null}
-          myPlayerName={myPlayerName}
+          myPlayerName={playerUsername}
         />
       </div>
 
@@ -265,6 +308,31 @@ export default function App() {
         />
       )}
 
+      {/* Achievement unlocked toast */}
+      {newAchievements.length > 0 && (
+        <div className="ach-toast" onClick={() => setNewAchievements([])}>
+          <div className="ach-toast-title">Achievement{newAchievements.length > 1 ? 's' : ''} Unlocked!</div>
+          {newAchievements.map(a => (
+            <div key={a.id} className="ach-toast-item">
+              🏆 <strong>{a.name}</strong> — {a.desc}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Profile modal */}
+      {showProfile && playerStats && (
+        <ProfileModal
+          username={playerUsername}
+          stats={playerStats}
+          achievements={playerAchievements}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
+
+      <button className="profile-btn" onClick={() => setShowProfile(true)}>
+        {playerUsername || 'Profile'}
+      </button>
       <button className="leave-btn" onClick={handleLeave}>Leave</button>
       <span className={`ws-badge ${wsStatus}`}>{wsStatus}</span>
     </div>

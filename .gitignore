@@ -10,6 +10,9 @@ server/uploads/
 # Runtime state that may be persisted to disk
 server/game-state.json
 
+# Player accounts — contains hashed passwords and stats, never commit
+server/accounts.json
+
 # Environment / secrets
 .env
 .env.*

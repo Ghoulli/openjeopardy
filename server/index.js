@@ -3,6 +3,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,6 +11,73 @@ const wss = new WebSocketServer({ server });
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+
+// ── Accounts ──────────────────────────────────────────────────────────────────
+const accountsFile = path.join(__dirname, 'accounts.json');
+let accounts = {};
+
+function loadAccounts() {
+  try {
+    if (fs.existsSync(accountsFile)) accounts = JSON.parse(fs.readFileSync(accountsFile, 'utf8'));
+  } catch { accounts = {}; }
+}
+
+function saveAccounts() {
+  try { fs.writeFileSync(accountsFile, JSON.stringify(accounts, null, 2)); }
+  catch (err) { console.error('Failed to save accounts:', err); }
+}
+
+function hashPassword(password, salt) {
+  return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+
+loadAccounts();
+
+const playerTokens = new Map(); // token -> { username, expiresAt }
+const PLAYER_TOKEN_TTL    = 24 * 60 * 60 * 1000;
+const PLAYER_LOGIN_MAX    = 10;
+const PLAYER_LOGIN_WINDOW = 5  * 60 * 1000;
+const PLAYER_LOGIN_BLOCK  = 10 * 60 * 1000;
+const playerLoginAttempts = new Map(); // ip -> { count, resetAt }
+
+const MAX_USERNAME_LEN = 30;
+const USERNAME_RE      = /^[a-zA-Z0-9 _\-.]+$/;
+
+const ACHIEVEMENTS = [
+  { id: 'first_game',  name: 'Showing Up',  desc: 'Play your first game' },
+  { id: 'first_win',   name: 'First Blood', desc: 'Win your first game' },
+  { id: 'veteran',     name: 'Veteran',     desc: 'Play 5 games' },
+  { id: 'champion',    name: 'Champion',    desc: 'Win 3 games' },
+  { id: 'legend',      name: 'Legend',      desc: 'Win 10 games' },
+  { id: 'rich',        name: 'Getting Paid',desc: 'Score $5,000+ in a single game' },
+  { id: 'loaded',      name: 'Loaded',      desc: 'Score $10,000+ in a single game' },
+  { id: 'high_roller', name: 'High Roller', desc: 'Score $25,000+ in a single game' },
+  { id: 'in_the_red',  name: 'In the Red',  desc: 'Finish a game with a negative score' },
+];
+
+function checkNewAchievements(account, gameResult) {
+  const already = new Set(account.achievements);
+  const s = account.stats;
+  return ACHIEVEMENTS.filter(ach => {
+    if (already.has(ach.id)) return false;
+    switch (ach.id) {
+      case 'first_game':  return s.gamesPlayed >= 1;
+      case 'first_win':   return s.gamesWon >= 1;
+      case 'veteran':     return s.gamesPlayed >= 5;
+      case 'champion':    return s.gamesWon >= 3;
+      case 'legend':      return s.gamesWon >= 10;
+      case 'rich':        return gameResult.finalScore >= 5000;
+      case 'loaded':      return gameResult.finalScore >= 10000;
+      case 'high_roller': return gameResult.finalScore >= 25000;
+      case 'in_the_red':  return gameResult.finalScore < 0;
+      default:            return false;
+    }
+  });
+}
+
+function achDetails(ids) {
+  return ids.map(id => ACHIEVEMENTS.find(a => a.id === id)).filter(Boolean);
+}
 
 // ── Security headers ──
 app.use((req, res, next) => {
@@ -54,11 +122,18 @@ function generateToken() {
   return `${a}${b}${c}`;
 }
 
+function generatePlayerToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
 // Prune expired tokens periodically
 setInterval(() => {
   const now = Date.now();
   for (const [tok, exp] of adminTokens) {
     if (now > exp) adminTokens.delete(tok);
+  }
+  for (const [tok, data] of playerTokens) {
+    if (now > data.expiresAt) playerTokens.delete(tok);
   }
 }, 60 * 60 * 1000);
 
@@ -133,6 +208,20 @@ const playerScores = {};
 
 const clients = new Map();
 
+function joinAsPlayer(ws, client, displayName) {
+  client.name = displayName;
+  client.isAdmin = false;
+  const existing = gameState.players.find(p => p.name === displayName);
+  if (existing) {
+    existing.id = client.id;
+    gameState.buzzOrder.forEach(b => { if (b.playerName === displayName) b.playerId = client.id; });
+  } else {
+    gameState.players.push({ id: client.id, name: displayName, score: playerScores[displayName] || 0 });
+  }
+  broadcast({ type: 'state', gameState: sanitize(gameState) });
+  send(ws, { type: 'registered', id: client.id });
+}
+
 function sanitize(state) {
   const { adminPassword, ...rest } = state;
   return rest;
@@ -162,7 +251,7 @@ wss.on('connection', (ws, req) => {
 
   const id = Math.random().toString(36).slice(2, 9);
   const ip = req.socket.remoteAddress || 'unknown';
-  clients.set(ws, { id, name: null, isAdmin: false, msgCount: 0, msgWindow: Date.now(), ip });
+  clients.set(ws, { id, name: null, isAdmin: false, username: null, msgCount: 0, msgWindow: Date.now(), ip });
 
   send(ws, { type: 'state', gameState: sanitize(gameState) });
 
@@ -187,20 +276,83 @@ wss.on('connection', (ws, req) => {
       case 'join': {
         const playerName = typeof msg.name === 'string' ? msg.name.trim().slice(0, MAX_NAME_LEN) : '';
         if (!playerName) return;
-        client.name = playerName;
-        client.isAdmin = false;
-        const existing = gameState.players.find(p => p.name === playerName);
-        if (existing) {
-          existing.id = client.id;
-          gameState.buzzOrder.forEach(b => {
-            if (b.playerName === playerName) b.playerId = client.id;
-          });
-        } else {
-          const score = playerScores[playerName] || 0;
-          gameState.players.push({ id: client.id, name: playerName, score });
+        joinAsPlayer(ws, client, playerName);
+        break;
+      }
+
+      case 'register_player': {
+        const uname = typeof msg.username === 'string' ? msg.username.trim().slice(0, MAX_USERNAME_LEN) : '';
+        const pw = typeof msg.password === 'string' ? msg.password : '';
+        if (uname.length < 2 || !USERNAME_RE.test(uname)) {
+          send(ws, { type: 'auth_error', message: 'Username must be 2–30 characters (letters, numbers, spaces, _ - .)' });
+          return;
         }
-        broadcast({ type: 'state', gameState: sanitize(gameState) });
-        send(ws, { type: 'registered', id: client.id });
+        if (pw.length < 4 || pw.length > 200) {
+          send(ws, { type: 'auth_error', message: 'Password must be 4–200 characters.' });
+          return;
+        }
+        if (accounts[uname]) {
+          send(ws, { type: 'auth_error', message: 'Username already taken.' });
+          return;
+        }
+        const salt = crypto.randomBytes(16).toString('hex');
+        accounts[uname] = {
+          passwordHash: hashPassword(pw, salt), salt,
+          stats: { totalEarnings: 0, gamesPlayed: 0, gamesWon: 0, highScore: 0 },
+          achievements: [],
+        };
+        saveAccounts();
+        const regTok = generatePlayerToken();
+        playerTokens.set(regTok, { username: uname, expiresAt: Date.now() + PLAYER_TOKEN_TTL });
+        client.username = uname;
+        send(ws, { type: 'player_auth', token: regTok, username: uname, stats: accounts[uname].stats, achievements: [] });
+        joinAsPlayer(ws, client, uname);
+        break;
+      }
+
+      case 'login_player': {
+        const uname = typeof msg.username === 'string' ? msg.username.trim().slice(0, MAX_USERNAME_LEN) : '';
+        const pw = typeof msg.password === 'string' ? msg.password : '';
+        const plAtt = playerLoginAttempts.get(client.ip) || { count: 0, resetAt: Date.now() + PLAYER_LOGIN_WINDOW };
+        if (Date.now() > plAtt.resetAt) { plAtt.count = 0; plAtt.resetAt = Date.now() + PLAYER_LOGIN_BLOCK; }
+        if (plAtt.count >= PLAYER_LOGIN_MAX) {
+          const waitSec = Math.ceil((plAtt.resetAt - Date.now()) / 1000);
+          send(ws, { type: 'auth_error', message: `Too many login attempts. Try again in ${waitSec}s.` });
+          return;
+        }
+        if (!accounts[uname] || hashPassword(pw, accounts[uname].salt) !== accounts[uname].passwordHash) {
+          plAtt.count++;
+          playerLoginAttempts.set(client.ip, plAtt);
+          send(ws, { type: 'auth_error', message: 'Invalid username or password.' });
+          return;
+        }
+        playerLoginAttempts.delete(client.ip);
+        const loginTok = generatePlayerToken();
+        playerTokens.set(loginTok, { username: uname, expiresAt: Date.now() + PLAYER_TOKEN_TTL });
+        client.username = uname;
+        const loginAcct = accounts[uname];
+        send(ws, { type: 'player_auth', token: loginTok, username: uname, stats: loginAcct.stats, achievements: achDetails(loginAcct.achievements) });
+        joinAsPlayer(ws, client, uname);
+        break;
+      }
+
+      case 'player_rejoin': {
+        const tokData = typeof msg.token === 'string' ? playerTokens.get(msg.token) : null;
+        if (!tokData || Date.now() > tokData.expiresAt) {
+          send(ws, { type: 'auth_error', message: 'Session expired — please log in again.' });
+          return;
+        }
+        tokData.expiresAt = Date.now() + PLAYER_TOKEN_TTL; // sliding window
+        const uname = tokData.username;
+        if (!accounts[uname]) {
+          playerTokens.delete(msg.token);
+          send(ws, { type: 'auth_error', message: 'Account not found.' });
+          return;
+        }
+        client.username = uname;
+        const rejoinAcct = accounts[uname];
+        send(ws, { type: 'player_auth', token: msg.token, username: uname, stats: rejoinAcct.stats, achievements: achDetails(rejoinAcct.achievements) });
+        joinAsPlayer(ws, client, uname);
         break;
       }
 
@@ -454,6 +606,28 @@ wss.on('connection', (ws, req) => {
 
       case 'reset_game': {
         if (!client.isAdmin) return;
+        // Record game results for logged-in players before clearing
+        if (gameState.players.length > 0) {
+          const maxScore = Math.max(...gameState.players.map(p => p.score));
+          const winnerNames = new Set(gameState.players.filter(p => p.score === maxScore).map(p => p.name));
+          for (const [playerWs, c] of clients) {
+            if (!c.username || !accounts[c.username]) continue;
+            const entry = gameState.players.find(p => p.name === c.name);
+            if (!entry) continue;
+            const finalScore = entry.score;
+            const isWinner = winnerNames.has(c.name);
+            const acct = accounts[c.username];
+            acct.stats.gamesPlayed++;
+            acct.stats.totalEarnings += finalScore;
+            if (isWinner) acct.stats.gamesWon++;
+            if (finalScore > acct.stats.highScore) acct.stats.highScore = finalScore;
+            const newAchs = checkNewAchievements(acct, { finalScore, isWinner });
+            newAchs.forEach(a => acct.achievements.push(a.id));
+            if (newAchs.length > 0) send(playerWs, { type: 'achievements_unlocked', achievements: newAchs });
+            send(playerWs, { type: 'stats_updated', stats: acct.stats, achievements: achDetails(acct.achievements) });
+          }
+          saveAccounts();
+        }
         gameState.cells = createDefaultCells();
         gameState.categories = Array.from({ length: NUM_COLS }, (_, i) => `Category ${i + 1}`);
         gameState.pointValues = [200, 400, 600, 800, 1000, 1200];
