@@ -131,9 +131,8 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
   function changePassword() {
     if (!newPw.trim()) return
     send({ type: 'update_password', password: newPw.trim() })
-    sessionStorage.setItem('adminPw', newPw.trim())
     setNewPw('')
-    alert('Password updated!')
+    alert('Password updated! Existing admin sessions remain valid until they disconnect.')
   }
 
   function resetScores() {
@@ -297,6 +296,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 isAdmin
                 onCellClick={handleGameCellClick}
                 onFinalClick={handleFinalClick}
+                onUnmarkCell={(col, row) => send({ type: 'unmark_answered', col, row })}
               />
             </div>
 
@@ -370,6 +370,33 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
               ))}
             </div>
 
+            <div className="board-size-row">
+              <span className="board-size-label">Columns:</span>
+              <input
+                type="range"
+                min={1}
+                max={12}
+                value={gameState.categories.length}
+                className="board-size-slider"
+                onChange={e => {
+                  const newCount = parseInt(e.target.value)
+                  const cur = gameState.categories.length
+                  if (newCount === cur) return
+                  const newCategories = Array.from({ length: newCount }, (_, i) =>
+                    gameState.categories[i] ?? `Category ${i + 1}`
+                  )
+                  const newCells = { ...gameState.cells }
+                  for (let col = cur; col < newCount; col++) {
+                    for (let row = 0; row < gameState.pointValues.length; row++) {
+                      newCells[`${col}-${row}`] = { question: '', answer: '', answered: false, image: null }
+                    }
+                  }
+                  send({ type: 'update_board', categories: newCategories, cells: newCells })
+                }}
+              />
+              <span className="board-size-value">{gameState.categories.length}</span>
+            </div>
+
             <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
               Edit category names inline. Click a cell to set its question, answer &amp; image.
               Green border = has content.
@@ -378,7 +405,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
             <div className="admin-board-wrap">
               <div
                 className="admin-board-grid"
-                style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(90px, 1fr)) 36px` }}
+                style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(90px, 1fr))` }}
               >
                 {gameState.categories.map((cat, col) => (
                   <input
@@ -394,15 +421,9 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     placeholder={`Category ${col + 1}`}
                   />
                 ))}
-                <button
-                  className="admin-add-btn"
-                  title="Add column"
-                  onClick={() => send({ type: 'add_column' })}
-                  style={{ gridRow: 1 }}
-                >+</button>
 
-                {gameState.pointValues.map((points, row) => [
-                  ...gameState.categories.map((_, col) => {
+                {gameState.pointValues.map((points, row) =>
+                  gameState.categories.map((_, col) => {
                     const key = `${col}-${row}`
                     const cell = gameState.cells[key]
                     const hasContent = !!(cell?.question || cell?.answer)
@@ -424,18 +445,16 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                         {hasImage && <span className="cell-img-icon">🖼</span>}
                       </button>
                     )
-                  }),
-                  row === gameState.pointValues.length - 1
-                    ? <button
-                        key="add-row"
-                        className="admin-add-btn admin-add-row-btn"
-                        title="Add row"
-                        onClick={() => send({ type: 'add_row' })}
-                      >+</button>
-                    : <div key={`spacer-${row}`} />
-                ])}
+                  })
+                )}
               </div>
             </div>
+
+            <button
+              className="admin-add-row-strip"
+              title="Add row"
+              onClick={() => send({ type: 'add_row' })}
+            >+ Add Row</button>
 
             <div className="final-jeopardy-edit">
               <h3>★ Final Jeopardy</h3>
@@ -722,7 +741,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 />
                 <button className="admin-btn blue" onClick={changePassword}>Update</button>
               </div>
-              <p className="hint-text">Default password is "jeopardy"</p>
+              <p className="hint-text">Set ADMIN_PASSWORD env var on the server to change the startup default.</p>
             </div>
 
             <div className="settings-block">

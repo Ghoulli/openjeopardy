@@ -4,91 +4,9 @@ import AdminPanel from './components/AdminPanel'
 import QuestionModal from './components/QuestionModal'
 import BuzzerDisplay from './components/BuzzerDisplay'
 import FinalJeopardyPage from './components/FinalJeopardyPage'
-
-const WS_URL = `ws://${window.location.hostname}:3001`
-
-function Scoreboard({ players, activePlayerName }) {
-  if (!players || players.length === 0) return null
-  return (
-    <div className="scoreboard">
-      {players.map(p => (
-        <div key={p.name} className={`player-score${p.name === activePlayerName ? ' active-player' : ''}`}>
-          <div className="player-score-name">{p.name}</div>
-          <div className="player-score-value">
-            {p.score < 0 ? '-' : ''}${Math.abs(p.score).toLocaleString()}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SetupView({ onPlayerJoin, onAdminLogin, adminError, wsStatus, sessionActive }) {
-  const [name, setName] = useState('')
-  const [showAdmin, setShowAdmin] = useState(false)
-  const [adminPw, setAdminPw] = useState('')
-
-  return (
-    <div className="setup-view">
-      <h1 className="jeopardy-title">JEOPARDY!</h1>
-
-      {!showAdmin ? (
-        <div className="setup-form">
-          {sessionActive ? (
-            <>
-              <input
-                type="text"
-                className="setup-input"
-                placeholder="Enter your name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && name.trim() && onPlayerJoin(name.trim())}
-                autoFocus
-              />
-              <button
-                className="btn-primary"
-                onClick={() => name.trim() && onPlayerJoin(name.trim())}
-              >
-                Join Game
-              </button>
-            </>
-          ) : (
-            <div className="working-on-it">
-              <div className="working-on-it-icon">🔧</div>
-              <p className="working-on-it-text">It&rsquo;s still being worked on!</p>
-              <p className="working-on-it-sub">Check back soon — the gamemaster will open the session shortly.</p>
-            </div>
-          )}
-          <button className="btn-secondary" onClick={() => setShowAdmin(true)}>
-            Admin Panel
-          </button>
-        </div>
-      ) : (
-        <div className="setup-form">
-          <h2>Admin Login</h2>
-          <input
-            type="password"
-            className="setup-input"
-            placeholder="Password"
-            value={adminPw}
-            onChange={e => setAdminPw(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && onAdminLogin(adminPw)}
-            autoFocus
-          />
-          {adminError && <p className="error-text">{adminError}</p>}
-          <button className="btn-primary" onClick={() => onAdminLogin(adminPw)}>
-            Login
-          </button>
-          <button className="btn-secondary" onClick={() => { setShowAdmin(false); setAdminPw('') }}>
-            Back
-          </button>
-        </div>
-      )}
-
-      <span className={`ws-badge ${wsStatus}`}>{wsStatus}</span>
-    </div>
-  )
-}
+import Scoreboard from './components/Scoreboard'
+import SetupView from './components/SetupView'
+import { WS_URL } from './config'
 
 export default function App() {
   const [gameState, setGameState] = useState(null)
@@ -118,11 +36,11 @@ export default function App() {
       setWsStatus('connected')
       clearTimeout(reconnectRef.current)
 
-      const savedPw = sessionStorage.getItem('adminPw')
+      const savedToken = sessionStorage.getItem('adminToken')
       const savedName = sessionStorage.getItem('playerName')
 
-      if (sessionStorage.getItem('isAdmin') === 'true' && savedPw) {
-        ws.send(JSON.stringify({ type: 'admin_join', password: savedPw }))
+      if (sessionStorage.getItem('isAdmin') === 'true' && savedToken) {
+        ws.send(JSON.stringify({ type: 'admin_rejoin', token: savedToken }))
       } else if (savedName) {
         ws.send(JSON.stringify({ type: 'join', name: savedName }))
       }
@@ -142,8 +60,16 @@ export default function App() {
           setPlayerId(msg.id)
           setIsAdmin(true)
           setView('admin')
+          if (msg.token) sessionStorage.setItem('adminToken', msg.token)
           break
         case 'error':
+          // If the admin token expired, clear stale session and go back to login
+          if (msg.message?.includes('Session expired') || msg.message?.includes('expired')) {
+            sessionStorage.removeItem('adminToken')
+            sessionStorage.removeItem('isAdmin')
+            setIsAdmin(false)
+            setView('setup')
+          }
           setAdminError(msg.message)
           break
       }
@@ -196,7 +122,7 @@ export default function App() {
   const handleAdminLogin = password => {
     setAdminError('')
     sessionStorage.setItem('isAdmin', 'true')
-    sessionStorage.setItem('adminPw', password)
+    // Do NOT store the password — a token is returned on success and stored instead
     send({ type: 'admin_join', password })
   }
 

@@ -11,6 +11,15 @@ const wss = new WebSocketServer({ server });
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
+// ── Security headers ──
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
 // Serve built client and uploads
 app.use('/uploads', express.static(uploadsDir));
 app.use(express.static(path.join(__dirname, '../client/dist')));
@@ -20,6 +29,75 @@ app.get('*', (req, res) => {
     if (err) res.status(404).send('Run `npm run build` to build the client first.');
   });
 });
+
+// ── Security constants ──
+const MAX_NAME_LEN    = 50;
+const MAX_IMG_B64     = 5 * 1024 * 1024; // 5 MB of base64 (~3.75 MB binary)
+const MAX_MSG_BYTES   = 12 * 1024 * 1024; // 12 MB max WebSocket message
+const RATE_LIMIT_MAX  = 60;              // messages/sec per client (general)
+const MAX_CONNECTIONS = 60;             // concurrent WebSocket connections
+
+// Admin login brute-force protection: 5 attempts per 5 min, then block for 15 min
+const LOGIN_MAX    = 5;
+const LOGIN_WINDOW = 5 * 60 * 1000;
+const LOGIN_BLOCK  = 15 * 60 * 1000;
+const loginAttempts = new Map(); // ip -> { count, resetAt }
+
+// Admin session tokens (replaces storing the password in the browser)
+const adminTokens = new Map(); // token -> expiresAt
+const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function generateToken() {
+  const a = Math.random().toString(36).slice(2, 11);
+  const b = Math.random().toString(36).slice(2, 11);
+  const c = Date.now().toString(36);
+  return `${a}${b}${c}`;
+}
+
+// Prune expired tokens periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [tok, exp] of adminTokens) {
+    if (now > exp) adminTokens.delete(tok);
+  }
+}, 60 * 60 * 1000);
+
+// ── Validation helpers ──
+
+function isNonNegInt(v) {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+function inCellBounds(col, row) {
+  return isNonNegInt(col) && isNonNegInt(row) &&
+    col < gameState.categories.length &&
+    row < gameState.pointValues.length;
+}
+
+// Returns canonical absolute path if imageUrl resolves safely inside uploadsDir, else null.
+function safeImagePath(imageUrl) {
+  if (typeof imageUrl !== 'string' || !imageUrl.startsWith('/uploads/')) return null;
+  const full = path.resolve(path.join(__dirname, imageUrl.slice(1)));
+  if (!full.startsWith(path.resolve(uploadsDir) + path.sep)) return null;
+  return full;
+}
+
+// Validates the first bytes of decoded image data match a known image format.
+function validImageBytes(buf) {
+  if (buf.length < 12) return false;
+  // PNG
+  if (buf[0]===0x89 && buf[1]===0x50 && buf[2]===0x4E && buf[3]===0x47) return true;
+  // JPEG
+  if (buf[0]===0xFF && buf[1]===0xD8 && buf[2]===0xFF) return true;
+  // GIF
+  if (buf[0]===0x47 && buf[1]===0x49 && buf[2]===0x46 && buf[3]===0x38) return true;
+  // WebP (RIFF....WEBP)
+  if (buf[0]===0x52 && buf[1]===0x49 && buf[2]===0x46 && buf[3]===0x46 &&
+      buf[8]===0x57 && buf[9]===0x45 && buf[10]===0x42 && buf[11]===0x50) return true;
+  return false;
+}
+
+// ── Game state ──
 
 const NUM_COLS = 7;
 const NUM_ROWS = 6;
@@ -45,7 +123,7 @@ let gameState = {
   activePlayerName: null,
   pendingCellRequest: null,
   finalJeopardy: { category: 'Final Jeopardy', question: '', answer: '', image: null, active: false, answerRevealed: false },
-  adminPassword: 'jeopardy',
+  adminPassword: process.env.ADMIN_PASSWORD || 'jeopardy',
   sessions: [],
   currentSessionId: null,
 };
@@ -75,31 +153,51 @@ function send(ws, message) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Enforce connection cap
+  if (clients.size >= MAX_CONNECTIONS) {
+    ws.close(1013, 'Server at capacity');
+    return;
+  }
+
   const id = Math.random().toString(36).slice(2, 9);
-  clients.set(ws, { id, name: null, isAdmin: false });
+  const ip = req.socket.remoteAddress || 'unknown';
+  clients.set(ws, { id, name: null, isAdmin: false, msgCount: 0, msgWindow: Date.now(), ip });
 
   send(ws, { type: 'state', gameState: sanitize(gameState) });
 
   ws.on('message', (raw) => {
+    // Enforce message size limit
+    if (raw.length > MAX_MSG_BYTES) return;
+
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
     const client = clients.get(ws);
 
+    // ── Rate limiting ──
+    const now = Date.now();
+    if (now - client.msgWindow > 1000) {
+      client.msgWindow = now;
+      client.msgCount = 0;
+    }
+    if (++client.msgCount > RATE_LIMIT_MAX) return;
+
     switch (msg.type) {
       case 'join': {
-        client.name = msg.name;
+        const playerName = typeof msg.name === 'string' ? msg.name.trim().slice(0, MAX_NAME_LEN) : '';
+        if (!playerName) return;
+        client.name = playerName;
         client.isAdmin = false;
-        const existing = gameState.players.find(p => p.name === msg.name);
+        const existing = gameState.players.find(p => p.name === playerName);
         if (existing) {
           existing.id = client.id;
           gameState.buzzOrder.forEach(b => {
-            if (b.playerName === msg.name) b.playerId = client.id;
+            if (b.playerName === playerName) b.playerId = client.id;
           });
         } else {
-          const score = playerScores[msg.name] || 0;
-          gameState.players.push({ id: client.id, name: msg.name, score });
+          const score = playerScores[playerName] || 0;
+          gameState.players.push({ id: client.id, name: playerName, score });
         }
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         send(ws, { type: 'registered', id: client.id });
@@ -107,13 +205,45 @@ wss.on('connection', (ws) => {
       }
 
       case 'admin_join': {
+        if (typeof msg.password !== 'string') return;
+        // Brute-force protection per source IP
+        const attempts = loginAttempts.get(client.ip) || { count: 0, resetAt: Date.now() + LOGIN_WINDOW };
+        if (Date.now() > attempts.resetAt) {
+          attempts.count = 0;
+          attempts.resetAt = Date.now() + LOGIN_BLOCK;
+        }
+        if (attempts.count >= LOGIN_MAX) {
+          const waitMin = Math.ceil((attempts.resetAt - Date.now()) / 60000);
+          send(ws, { type: 'error', message: `Too many login attempts. Try again in ${waitMin} minute(s).` });
+          return;
+        }
         if (msg.password !== gameState.adminPassword) {
+          attempts.count++;
+          loginAttempts.set(client.ip, attempts);
           send(ws, { type: 'error', message: 'Incorrect password' });
+          return;
+        }
+        // Success: clear attempts, issue token
+        loginAttempts.delete(client.ip);
+        const token = generateToken();
+        adminTokens.set(token, Date.now() + TOKEN_TTL);
+        client.isAdmin = true;
+        client.name = 'Admin';
+        send(ws, { type: 'admin_registered', id: client.id, token });
+        send(ws, { type: 'state', gameState });
+        break;
+      }
+
+      case 'admin_rejoin': {
+        // Token-based reconnect — no password re-transmission needed
+        const tokenExp = typeof msg.token === 'string' ? adminTokens.get(msg.token) : null;
+        if (!tokenExp || Date.now() > tokenExp) {
+          send(ws, { type: 'error', message: 'Session expired — please log in again.' });
           return;
         }
         client.isAdmin = true;
         client.name = 'Admin';
-        send(ws, { type: 'admin_registered', id: client.id });
+        send(ws, { type: 'admin_registered', id: client.id, token: msg.token });
         send(ws, { type: 'state', gameState });
         break;
       }
@@ -121,13 +251,13 @@ wss.on('connection', (ws) => {
       case 'buzz': {
         if (!gameState.buzzerActive) return;
         if (gameState.buzzOrder.some(b => b.playerId === client.id)) return;
-        const now = Date.now();
-        const firstTime = gameState.buzzOrder.length > 0 ? gameState.buzzOrder[0].time : now;
+        const buzzNow = Date.now();
+        const firstTime = gameState.buzzOrder.length > 0 ? gameState.buzzOrder[0].time : buzzNow;
         gameState.buzzOrder.push({
           playerId: client.id,
           playerName: client.name || 'Unknown',
-          time: now,
-          delta: now - firstTime,
+          time: buzzNow,
+          delta: buzzNow - firstTime,
         });
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
@@ -151,7 +281,14 @@ wss.on('connection', (ws) => {
 
       case 'set_active_cell': {
         if (!client.isAdmin) return;
-        gameState.activeCell = msg.cell;
+        if (msg.cell == null) {
+          gameState.activeCell = null;
+        } else {
+          const col = parseInt(msg.cell?.col);
+          const row = parseInt(msg.cell?.row);
+          if (!inCellBounds(col, row)) return;
+          gameState.activeCell = { col, row };
+        }
         gameState.pendingCellRequest = null;
         gameState.buzzOrder = [];
         gameState.buzzerActive = false;
@@ -183,33 +320,66 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'unmark_answered': {
+        if (!client.isAdmin) return;
+        const col = parseInt(msg.col);
+        const row = parseInt(msg.row);
+        if (!isFinite(col) || !isFinite(row)) return;
+        const key = `${col}-${row}`;
+        if (gameState.cells[key]) gameState.cells[key].answered = false;
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
       case 'update_board': {
         if (!client.isAdmin) return;
-        if (msg.categories) gameState.categories = msg.categories;
-        if (msg.pointValues) gameState.pointValues = msg.pointValues;
-        if (msg.cells) gameState.cells = msg.cells;
+        if (msg.categories !== undefined) {
+          if (!Array.isArray(msg.categories)) return;
+          gameState.categories = msg.categories.map(c => typeof c === 'string' ? c.slice(0, 100) : '');
+        }
+        if (msg.pointValues !== undefined) {
+          if (!Array.isArray(msg.pointValues)) return;
+          gameState.pointValues = msg.pointValues.map(v =>
+            typeof v === 'number' && isFinite(v) ? Math.floor(v) : 0
+          );
+        }
+        if (msg.cells !== undefined) {
+          if (typeof msg.cells !== 'object' || msg.cells === null) return;
+          gameState.cells = msg.cells;
+        }
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
 
       case 'update_players': {
         if (!client.isAdmin) return;
-        msg.players.forEach(p => { playerScores[p.name] = p.score; });
-        gameState.players = msg.players;
+        if (!Array.isArray(msg.players)) return;
+        const validated = msg.players
+          .filter(p => typeof p.name === 'string' && p.name.trim())
+          .map(p => ({
+            id: String(p.id || ''),
+            name: p.name.trim().slice(0, MAX_NAME_LEN),
+            score: typeof p.score === 'number' && isFinite(p.score) ? Math.floor(p.score) : 0,
+          }));
+        validated.forEach(p => { playerScores[p.name] = p.score; });
+        gameState.players = validated;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
 
       case 'update_password': {
         if (!client.isAdmin) return;
-        gameState.adminPassword = msg.password;
+        if (typeof msg.password !== 'string' || !msg.password.trim()) return;
+        gameState.adminPassword = msg.password.trim().slice(0, 200);
+        // Revoke all existing admin tokens so old sessions must re-authenticate
+        adminTokens.clear();
         send(ws, { type: 'state', gameState });
         break;
       }
 
       case 'add_player': {
         if (!client.isAdmin) return;
-        const pname = (msg.name || '').trim();
+        const pname = typeof msg.name === 'string' ? msg.name.trim().slice(0, MAX_NAME_LEN) : '';
         if (!pname) return;
         if (gameState.players.find(p => p.name === pname)) return;
         const pid = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -220,7 +390,13 @@ wss.on('connection', (ws) => {
 
       case 'set_active_player': {
         if (!client.isAdmin) return;
-        gameState.activePlayerName = msg.playerName;
+        if (msg.playerName === null || msg.playerName === undefined) {
+          gameState.activePlayerName = null;
+        } else {
+          const pname = typeof msg.playerName === 'string' ? msg.playerName.trim() : '';
+          if (!gameState.players.some(p => p.name === pname)) return;
+          gameState.activePlayerName = pname;
+        }
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -238,7 +414,12 @@ wss.on('connection', (ws) => {
 
       case 'update_final_jeopardy': {
         if (!client.isAdmin) return;
-        gameState.finalJeopardy = { ...gameState.finalJeopardy, ...msg.data };
+        if (typeof msg.data !== 'object' || msg.data === null) return;
+        const patch = {};
+        for (const k of ['category', 'question', 'answer']) {
+          if (typeof msg.data[k] === 'string') patch[k] = msg.data[k].slice(0, 2000);
+        }
+        gameState.finalJeopardy = { ...gameState.finalJeopardy, ...patch };
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -297,7 +478,8 @@ wss.on('connection', (ws) => {
 
       case 'create_session': {
         if (!client.isAdmin) return;
-        const sname = (msg.name || '').trim() || `Session ${gameState.sessions.length + 1}`;
+        const sname = (typeof msg.name === 'string' ? msg.name.trim() : '').slice(0, 100)
+          || `Session ${gameState.sessions.length + 1}`;
         const sid = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
         const sessionDir = path.join(uploadsDir, sid);
         if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
@@ -322,20 +504,24 @@ wss.on('connection', (ws) => {
       case 'upload_image': {
         if (!client.isAdmin) return;
         if (!gameState.currentSessionId) return;
-        const { col, row, imageBase64, mimeType } = msg;
+        const col = parseInt(msg.col);
+        const row = parseInt(msg.row);
+        if (!inCellBounds(col, row)) return;
+        if (typeof msg.imageBase64 !== 'string' || msg.imageBase64.length > MAX_IMG_B64) return;
+        const imgBuf = Buffer.from(msg.imageBase64, 'base64');
+        if (!validImageBytes(imgBuf)) return;
         const extMap = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/jpg': 'jpg' };
-        const ext = extMap[mimeType] || 'jpg';
+        const ext = extMap[msg.mimeType] || 'jpg';
         const filename = `${col}-${row}-${Date.now()}.${ext}`;
         const sessionDir = path.join(uploadsDir, gameState.currentSessionId);
         if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
-        // Remove old image file if one exists
         const cellKey = `${col}-${row}`;
         const oldImage = gameState.cells[cellKey]?.image;
         if (oldImage) {
-          const oldFile = path.join(__dirname, oldImage.replace(/^\//, ''));
-          try { if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile); } catch {}
+          const oldFile = safeImagePath(oldImage);
+          if (oldFile) { try { if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile); } catch {} }
         }
-        fs.writeFileSync(path.join(sessionDir, filename), Buffer.from(imageBase64, 'base64'));
+        fs.writeFileSync(path.join(sessionDir, filename), imgBuf);
         const imageUrl = `/uploads/${gameState.currentSessionId}/${filename}`;
         gameState.cells = { ...gameState.cells, [cellKey]: { ...gameState.cells[cellKey], image: imageUrl } };
         broadcast({ type: 'state', gameState: sanitize(gameState) });
@@ -344,12 +530,14 @@ wss.on('connection', (ws) => {
 
       case 'remove_image': {
         if (!client.isAdmin) return;
-        const { col, row } = msg;
+        const col = parseInt(msg.col);
+        const row = parseInt(msg.row);
+        if (!inCellBounds(col, row)) return;
         const cellKey = `${col}-${row}`;
         const oldImage = gameState.cells[cellKey]?.image;
         if (oldImage) {
-          const oldFile = path.join(__dirname, oldImage.replace(/^\//, ''));
-          try { if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile); } catch {}
+          const oldFile = safeImagePath(oldImage);
+          if (oldFile) { try { if (fs.existsSync(oldFile)) fs.unlinkSync(oldFile); } catch {} }
           gameState.cells = { ...gameState.cells, [cellKey]: { ...gameState.cells[cellKey], image: null } };
           broadcast({ type: 'state', gameState: sanitize(gameState) });
         }
@@ -363,7 +551,9 @@ wss.on('connection', (ws) => {
         if (gameState.activePlayerName !== client.name) return;
         if (gameState.pendingCellRequest) return;
         if (gameState.activeCell) return;
-        const { col, row } = msg;
+        const col = parseInt(msg.col);
+        const row = parseInt(msg.row);
+        if (!inCellBounds(col, row)) return;
         const cellKey = `${col}-${row}`;
         if (!gameState.cells[cellKey] || gameState.cells[cellKey].answered) return;
         gameState.pendingCellRequest = { playerId: client.id, playerName: client.name, col, row };
@@ -403,7 +593,8 @@ wss.on('connection', (ws) => {
         const delIdx = gameState.sessions.findIndex(s => s.id === msg.id);
         if (delIdx === -1) return;
         const delSess = gameState.sessions[delIdx];
-        const delDir = path.join(uploadsDir, delSess.id);
+        const delDir = path.resolve(uploadsDir, delSess.id);
+        if (!delDir.startsWith(path.resolve(uploadsDir) + path.sep)) return;
         try { if (fs.existsSync(delDir)) fs.rmSync(delDir, { recursive: true, force: true }); } catch {}
         gameState.sessions.splice(delIdx, 1);
         if (gameState.currentSessionId === delSess.id) {
@@ -447,18 +638,20 @@ wss.on('connection', (ws) => {
       case 'upload_final_image': {
         if (!client.isAdmin) return;
         if (!gameState.currentSessionId) return;
-        const { imageBase64: fjBase64, mimeType: fjMime } = msg;
+        if (typeof msg.imageBase64 !== 'string' || msg.imageBase64.length > MAX_IMG_B64) return;
+        const fjBuf = Buffer.from(msg.imageBase64, 'base64');
+        if (!validImageBytes(fjBuf)) return;
         const fjExtMap = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/jpg': 'jpg' };
-        const fjExt = fjExtMap[fjMime] || 'jpg';
+        const fjExt = fjExtMap[msg.mimeType] || 'jpg';
         const fjFilename = `final-${Date.now()}.${fjExt}`;
         const fjDir = path.join(uploadsDir, gameState.currentSessionId);
         if (!fs.existsSync(fjDir)) fs.mkdirSync(fjDir, { recursive: true });
         const fjOld = gameState.finalJeopardy.image;
         if (fjOld) {
-          const fjOldFile = path.join(__dirname, fjOld.replace(/^\//, ''));
-          try { if (fs.existsSync(fjOldFile)) fs.unlinkSync(fjOldFile); } catch {}
+          const fjOldFile = safeImagePath(fjOld);
+          if (fjOldFile) { try { if (fs.existsSync(fjOldFile)) fs.unlinkSync(fjOldFile); } catch {} }
         }
-        fs.writeFileSync(path.join(fjDir, fjFilename), Buffer.from(fjBase64, 'base64'));
+        fs.writeFileSync(path.join(fjDir, fjFilename), fjBuf);
         gameState.finalJeopardy = { ...gameState.finalJeopardy, image: `/uploads/${gameState.currentSessionId}/${fjFilename}` };
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
@@ -468,8 +661,8 @@ wss.on('connection', (ws) => {
         if (!client.isAdmin) return;
         const fjOldImg = gameState.finalJeopardy.image;
         if (fjOldImg) {
-          const fjOldFile = path.join(__dirname, fjOldImg.replace(/^\//, ''));
-          try { if (fs.existsSync(fjOldFile)) fs.unlinkSync(fjOldFile); } catch {}
+          const fjOldFile = safeImagePath(fjOldImg);
+          if (fjOldFile) { try { if (fs.existsSync(fjOldFile)) fs.unlinkSync(fjOldFile); } catch {} }
           gameState.finalJeopardy = { ...gameState.finalJeopardy, image: null };
           broadcast({ type: 'state', gameState: sanitize(gameState) });
         }
@@ -494,4 +687,9 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`OpenJeopardy server running at http://localhost:${PORT}`);
   console.log(`Also accessible on LAN at http://<your-ip>:${PORT}`);
+  if (!process.env.ADMIN_PASSWORD) {
+    console.warn('\n⚠️  WARNING: ADMIN_PASSWORD env var is not set.');
+    console.warn('   Using default password "jeopardy" — change it before exposing to the internet!');
+    console.warn('   Set it with: ADMIN_PASSWORD=yourpassword node server/index.js\n');
+  }
 });

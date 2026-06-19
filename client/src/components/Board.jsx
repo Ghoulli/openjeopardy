@@ -1,4 +1,4 @@
-export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, myPlayerName }) {
+export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, onUnmarkCell, myPlayerName }) {
   const { categories, pointValues, cells, activeCell, finalJeopardy, activePlayerName, pendingCellRequest } = gameState
 
   const fj = finalJeopardy || { category: 'Final Jeopardy', active: false }
@@ -54,6 +54,13 @@ export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, m
               aria-label={answered ? 'answered' : `$${points}`}
             >
               {!answered ? `$${points}` : ''}
+              {answered && onUnmarkCell && (
+                <span
+                  className="unmark-btn"
+                  title="Restore question"
+                  onClick={e => { e.stopPropagation(); onUnmarkCell(col, row) }}
+                >↺</span>
+              )}
             </button>
           )
         })
