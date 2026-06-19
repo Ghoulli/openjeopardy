@@ -10,15 +10,28 @@ export default function QuestionModal({
 
   if (!cell) return null
 
+  const hasImage = !!cell.image
+
   return (
     <div className="modal-overlay">
       <div className="modal">
         <div className="modal-meta">{category}</div>
         <div className="modal-points">${pointValue}</div>
 
-        <div className="modal-question">
-          {cell.question || <em style={{ opacity: 0.5 }}>No question set</em>}
-        </div>
+        {hasImage ? (
+          <div className="modal-content-row">
+            <div className="modal-question modal-question-left">
+              {cell.question || <em style={{ opacity: 0.5 }}>No question set</em>}
+            </div>
+            <div className="modal-image-wrap">
+              <img src={cell.image} alt="" className="modal-image" />
+            </div>
+          </div>
+        ) : (
+          <div className="modal-question">
+            {cell.question || <em style={{ opacity: 0.5 }}>No question set</em>}
+          </div>
+        )}
 
         {isAdmin && showAnswer && (
           <div className="modal-answer">

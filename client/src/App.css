@@ -222,7 +222,6 @@ body {
 .board {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
   gap: 4px;
   background: #02040e;
   border: 3px solid #02040e;
@@ -522,7 +521,6 @@ body {
 }
 .admin-board-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(90px, 1fr));
   gap: 3px;
   background: #02040e;
   border: 2px solid #02040e;
@@ -1009,6 +1007,335 @@ body {
   color: var(--cream);
 }
 
+/* ── Working on it page ── */
+.working-on-it {
+  text-align: center;
+  padding: 1rem 0;
+}
+.working-on-it-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+.working-on-it-text {
+  font-size: 1.25rem;
+  color: var(--gold-light);
+  font-family: 'Cinzel', inherit;
+  font-weight: bold;
+  margin-bottom: 0.4rem;
+}
+.working-on-it-sub {
+  color: var(--cream-dim);
+  font-size: 0.85rem;
+  font-family: Arial, sans-serif;
+}
+
+/* ── Modal image layout ── */
+.modal-content-row {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+.modal-question-left {
+  flex: 1;
+  text-align: left;
+  font-size: clamp(1.1rem, 2.6vw, 1.75rem);
+  line-height: 1.45;
+  padding: 0.5rem 0;
+  color: var(--cream);
+}
+.modal-image-wrap {
+  flex-shrink: 0;
+  width: 38%;
+  max-width: 320px;
+}
+.modal-image {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(201,164,42,0.35);
+  box-shadow: 0 4px 18px rgba(0,0,0,0.55);
+  display: block;
+}
+
+/* ── Turn indicator (player board) ── */
+.turn-indicator {
+  position: fixed;
+  bottom: 3.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.55rem 1.25rem;
+  border-radius: 24px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  white-space: nowrap;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+}
+.turn-indicator.turn-mine {
+  background: linear-gradient(135deg, #0e3a1a 0%, #0a2e10 100%);
+  border: 1px solid rgba(58,170,88,0.5);
+  color: #7ae89a;
+}
+.turn-indicator.turn-other {
+  background: rgba(13,20,80,0.85);
+  border: 1px solid rgba(201,164,42,0.25);
+  color: var(--cream-dim);
+}
+.cancel-request-btn {
+  background: rgba(192,48,48,0.25);
+  border: 1px solid rgba(192,48,48,0.5);
+  color: #ee7070;
+  border-radius: 14px;
+  padding: 0.2rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+.cancel-request-btn:hover { background: rgba(192,48,48,0.4); }
+
+/* ── "Not your turn" toast ── */
+.not-your-turn-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(8, 12, 48, 0.95);
+  border: 1px solid rgba(201,164,42,0.4);
+  border-radius: 12px;
+  padding: 0.85rem 2rem;
+  font-size: 1.15rem;
+  font-weight: bold;
+  color: var(--cream);
+  z-index: 900;
+  pointer-events: none;
+  box-shadow: var(--shadow-deep), var(--shadow-gold);
+  animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.93); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ── Board cells: not-my-turn dim, pending-request highlight ── */
+.board-cell.not-my-turn {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+.board-cell.pending-request {
+  background: linear-gradient(180deg, #2a1a08 0%, #180e04 100%);
+  outline: 3px solid var(--orange);
+  color: #e8a060;
+  animation: pending-pulse 1.4s ease-in-out infinite;
+}
+@keyframes pending-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(212,122,42,0.3); }
+  50%       { box-shadow: 0 0 20px rgba(212,122,42,0.7); }
+}
+
+/* ── Pending cell request banner (admin) ── */
+.pending-request-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: rgba(212,122,42,0.08);
+  border: 1px solid rgba(212,122,42,0.5);
+  border-radius: 10px;
+  padding: 0.85rem 1.1rem;
+  margin-bottom: 1.25rem;
+  animation: pending-pulse 1.4s ease-in-out infinite;
+}
+.pending-request-info {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.pending-request-player {
+  color: var(--gold-light);
+  font-weight: bold;
+  font-size: 1rem;
+}
+.pending-request-text {
+  color: var(--cream-dim);
+  font-size: 0.9rem;
+}
+.pending-request-text strong { color: var(--cream); }
+.pending-request-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ── Tab badge (notification dot) ── */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--orange);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 900;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ── Sessions tab ── */
+.sessions-empty {
+  text-align: center;
+  padding: 2.5rem;
+  color: rgba(245,237,218,0.4);
+  border: 1px dashed rgba(245,237,218,0.15);
+  border-radius: 10px;
+}
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  background: rgba(13,20,80,0.35);
+  border: 1px solid rgba(245,237,218,0.1);
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+.session-item.session-active {
+  border-color: rgba(58,170,88,0.5);
+  background: rgba(10,46,24,0.3);
+}
+.session-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.session-item-name {
+  font-weight: bold;
+  color: var(--cream);
+  font-size: 0.95rem;
+}
+.session-item-date {
+  color: rgba(245,237,218,0.35);
+  font-size: 0.75rem;
+  font-family: Arial, sans-serif;
+}
+.session-item-actions { flex-shrink: 0; }
+.session-active-badge {
+  color: #7ae89a;
+  font-weight: bold;
+  font-size: 0.85rem;
+}
+
+/* ── Cell image in edit board ── */
+.cell-img-icon {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
+.admin-cell-btn { position: relative; }
+
+.cell-image-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 0.4rem;
+}
+.cell-image-preview-img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 7px;
+  border: 1px solid rgba(201,164,42,0.3);
+  object-fit: contain;
+}
+.cell-file-input {
+  margin-top: 0.5rem;
+  color: var(--cream-dim);
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  width: 100%;
+}
+.cell-file-input::file-selector-button {
+  background: rgba(13,20,80,0.8);
+  border: 1px solid rgba(245,237,218,0.25);
+  color: var(--cream);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  margin-right: 0.6rem;
+  transition: background 0.12s;
+}
+.cell-file-input::file-selector-button:hover {
+  background: rgba(25,35,110,0.9);
+}
+
+/* ── No session notice (edit board) ── */
+.no-session-notice {
+  background: rgba(212,122,42,0.07);
+  border: 1px solid rgba(212,122,42,0.35);
+  color: #e8a060;
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Add column/row + buttons in edit board grid ── */
+.admin-add-btn {
+  background: rgba(13,20,80,0.5);
+  border: 1px dashed rgba(245,237,218,0.25);
+  color: rgba(245,237,218,0.5);
+  font-size: 1.1rem;
+  font-weight: bold;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  min-height: 55px;
+}
+.admin-add-btn:hover {
+  background: rgba(58,170,88,0.12);
+  border-color: rgba(58,170,88,0.5);
+  color: #7ae89a;
+}
+.admin-add-row-btn {
+  grid-column: -2 / -1;
+}
+
+/* ── Final Jeopardy image ── */
+.fj-image-wrap {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto 1.5rem;
+  text-align: center;
+}
+.fj-image {
+  max-width: 100%;
+  max-height: 55vh;
+  border-radius: 16px;
+  border: 1px solid rgba(201,164,42,0.35);
+  box-shadow: 0 8px 48px rgba(0,0,0,0.7);
+  object-fit: contain;
+  display: inline-block;
+  animation: fj-in 0.6s ease-out;
+}
+
 /* Responsive */
 @media (max-width: 700px) {
   .jeopardy-title { font-size: 3rem; }
@@ -1016,4 +1343,7 @@ body {
   .category-cell { font-size: 0.5rem; min-height: 52px; }
   .modal { padding: 1.25rem; }
   .admin-content { padding: 1rem; }
+  .modal-content-row { flex-direction: column; }
+  .modal-image-wrap { width: 100%; max-width: 100%; }
+  .turn-indicator { font-size: 0.8rem; padding: 0.45rem 0.9rem; }
 }

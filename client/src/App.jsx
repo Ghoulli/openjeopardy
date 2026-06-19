@@ -23,7 +23,7 @@ function Scoreboard({ players, activePlayerName }) {
   )
 }
 
-function SetupView({ onPlayerJoin, onAdminLogin, adminError, wsStatus }) {
+function SetupView({ onPlayerJoin, onAdminLogin, adminError, wsStatus, sessionActive }) {
   const [name, setName] = useState('')
   const [showAdmin, setShowAdmin] = useState(false)
   const [adminPw, setAdminPw] = useState('')
@@ -34,21 +34,31 @@ function SetupView({ onPlayerJoin, onAdminLogin, adminError, wsStatus }) {
 
       {!showAdmin ? (
         <div className="setup-form">
-          <input
-            type="text"
-            className="setup-input"
-            placeholder="Enter your name"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && name.trim() && onPlayerJoin(name.trim())}
-            autoFocus
-          />
-          <button
-            className="btn-primary"
-            onClick={() => name.trim() && onPlayerJoin(name.trim())}
-          >
-            Join Game
-          </button>
+          {sessionActive ? (
+            <>
+              <input
+                type="text"
+                className="setup-input"
+                placeholder="Enter your name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && name.trim() && onPlayerJoin(name.trim())}
+                autoFocus
+              />
+              <button
+                className="btn-primary"
+                onClick={() => name.trim() && onPlayerJoin(name.trim())}
+              >
+                Join Game
+              </button>
+            </>
+          ) : (
+            <div className="working-on-it">
+              <div className="working-on-it-icon">🔧</div>
+              <p className="working-on-it-text">It&rsquo;s still being worked on!</p>
+              <p className="working-on-it-sub">Check back soon — the gamemaster will open the session shortly.</p>
+            </div>
+          )}
           <button className="btn-secondary" onClick={() => setShowAdmin(true)}>
             Admin Panel
           </button>
@@ -87,6 +97,8 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [wsStatus, setWsStatus] = useState('connecting')
   const [adminError, setAdminError] = useState('')
+  const [notYourTurn, setNotYourTurn] = useState(false)
+  const notYourTurnTimer = useRef(null)
 
   const wsRef = useRef(null)
   const reconnectRef = useRef(null)
@@ -139,7 +151,7 @@ export default function App() {
 
     ws.onclose = () => {
       setWsStatus('disconnected')
-      reconnectRef.current = setTimeout(connect, 3000)
+      reconnectRef.current = setTimeout(connect, 1000)
     }
 
     ws.onerror = () => ws.close()
@@ -195,15 +207,33 @@ export default function App() {
     setView('setup')
   }
 
+  const myPlayerName = sessionStorage.getItem('playerName') || null
+
+  function handlePlayerCellClick(col, row) {
+    if (!gameState) return
+    const isMyTurn = myPlayerName && myPlayerName === gameState.activePlayerName
+    if (!isMyTurn) {
+      // Show "not your turn" toast
+      clearTimeout(notYourTurnTimer.current)
+      setNotYourTurn(true)
+      notYourTurnTimer.current = setTimeout(() => setNotYourTurn(false), 2200)
+      return
+    }
+    if (gameState.pendingCellRequest) return
+    send({ type: 'request_open_cell', col, row })
+  }
+
   const isFinalPage = window.location.pathname === '/final'
 
   if (!gameState) {
     return (
-      <div className="loading">
-        <div className="loading-text">
-          {wsStatus === 'disconnected' ? 'Reconnecting...' : 'Connecting...'}
-        </div>
-      </div>
+      <SetupView
+        onPlayerJoin={handlePlayerJoin}
+        onAdminLogin={handleAdminLogin}
+        adminError={adminError}
+        wsStatus={wsStatus}
+        sessionActive={false}
+      />
     )
   }
 
@@ -218,6 +248,7 @@ export default function App() {
         onAdminLogin={handleAdminLogin}
         adminError={adminError}
         wsStatus={wsStatus}
+        sessionActive={!!gameState.currentSessionId}
       />
     )
   }
@@ -239,12 +270,49 @@ export default function App() {
     ? gameState.cells[`${activeCell.col}-${activeCell.row}`]
     : null
 
+  const pendingReq = gameState.pendingCellRequest
+  const isMyTurn = myPlayerName && myPlayerName === gameState.activePlayerName
+  const myPendingRequest = pendingReq && pendingReq.playerName === myPlayerName
+
   return (
     <div className="app">
       <div className="game-wrap">
         <Scoreboard players={gameState.players} activePlayerName={gameState.activePlayerName} />
-        <Board gameState={gameState} isAdmin={false} onCellClick={null} onFinalClick={null} />
+        <Board
+          gameState={gameState}
+          isAdmin={false}
+          onCellClick={handlePlayerCellClick}
+          onFinalClick={null}
+          myPlayerName={myPlayerName}
+        />
       </div>
+
+      {/* Turn indicator */}
+      {gameState.activePlayerName && !activeCell && (
+        <div className={`turn-indicator ${isMyTurn ? 'turn-mine' : 'turn-other'}`}>
+          {isMyTurn
+            ? myPendingRequest
+              ? '⏳ Waiting for gamemaster approval…'
+              : '🎯 Your turn — pick a question!'
+            : `It's ${gameState.activePlayerName}'s turn`
+          }
+          {myPendingRequest && (
+            <button
+              className="cancel-request-btn"
+              onClick={() => send({ type: 'cancel_cell_request' })}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* "Not your turn" toast */}
+      {notYourTurn && (
+        <div className="not-your-turn-toast">
+          It is not your turn
+        </div>
+      )}
 
       {gameState.buzzerActive && !activeCell && (
         <div className="buzzer-active-banner">

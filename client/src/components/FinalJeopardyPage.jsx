@@ -11,6 +11,11 @@ export default function FinalJeopardyPage({ gameState, wsStatus }) {
       <div className="fj-body">
         {fj.active ? (
           <>
+            {fj.image && (
+              <div className="fj-image-wrap">
+                <img src={fj.image} alt="" className="fj-image" />
+              </div>
+            )}
             <div className="fj-question">
               {fj.question || <em style={{ opacity: 0.5 }}>Question will appear here</em>}
             </div>

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Board from './Board'
 import BuzzerDisplay from './BuzzerDisplay'
 import QuestionModal from './QuestionModal'
@@ -8,27 +8,92 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
   const [editingCell, setEditingCell] = useState(null)
   const [editQ, setEditQ] = useState('')
   const [editA, setEditA] = useState('')
+  const [editImg, setEditImg] = useState(null)       // current image URL or null
+  const [editImgFile, setEditImgFile] = useState(null) // new File selected or null
+  const [editImgRemove, setEditImgRemove] = useState(false)
   const [newPlayerName, setNewPlayerName] = useState('')
   const [newPw, setNewPw] = useState('')
+  const [newSessionName, setNewSessionName] = useState('')
+  const fileInputRef = useRef(null)
+  const fjImgFileRef = useRef(null)
 
   const activeCell = gameState?.activeCell
   const activeCellData = activeCell
     ? gameState.cells[`${activeCell.col}-${activeCell.row}`]
     : null
 
+  const pendingReq = gameState?.pendingCellRequest
+
   function openCellEdit(col, row) {
     const cell = gameState.cells[`${col}-${row}`]
     setEditingCell({ col, row })
     setEditQ(cell?.question || '')
     setEditA(cell?.answer || '')
+    setEditImg(cell?.image || null)
+    setEditImgFile(null)
+    setEditImgRemove(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   function saveCell() {
-    const newCells = { ...gameState.cells }
     const key = `${editingCell.col}-${editingCell.row}`
+    const newCells = { ...gameState.cells }
     newCells[key] = { ...newCells[key], question: editQ, answer: editA }
     send({ type: 'update_board', cells: newCells })
+
+    if (editImgFile) {
+      const reader = new FileReader()
+      reader.onload = e => {
+        const dataUrl = e.target.result
+        const comma = dataUrl.indexOf(',')
+        const header = dataUrl.slice(0, comma)
+        const base64 = dataUrl.slice(comma + 1)
+        const mimeType = header.match(/:(.*?);/)[1]
+        send({ type: 'upload_image', col: editingCell.col, row: editingCell.row, imageBase64: base64, mimeType })
+      }
+      reader.readAsDataURL(editImgFile)
+    } else if (editImgRemove && editImg) {
+      send({ type: 'remove_image', col: editingCell.col, row: editingCell.row })
+    }
+
     setEditingCell(null)
+  }
+
+  function handleImageSelect(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setEditImgFile(file)
+    setEditImgRemove(false)
+    // Show preview
+    const reader = new FileReader()
+    reader.onload = ev => setEditImg(ev.target.result)
+    reader.readAsDataURL(file)
+  }
+
+  function removeImage() {
+    setEditImg(null)
+    setEditImgFile(null)
+    setEditImgRemove(true)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function handleFjImageSelect(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const dataUrl = ev.target.result
+      const comma = dataUrl.indexOf(',')
+      const base64 = dataUrl.slice(comma + 1)
+      const mimeType = dataUrl.slice(0, comma).match(/:(.*?);/)[1]
+      send({ type: 'upload_final_image', imageBase64: base64, mimeType })
+      if (fjImgFileRef.current) fjImgFileRef.current.value = ''
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function removeFjImage() {
+    send({ type: 'remove_final_image' })
   }
 
   function handleGameCellClick(col, row) {
@@ -88,7 +153,17 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     send({ type: 'reset_game' })
   }
 
+  function createSession() {
+    const name = newSessionName.trim()
+    send({ type: 'create_session', name })
+    setNewSessionName('')
+  }
+
   const activePoints = activeCell ? gameState.pointValues[activeCell.row] : 0
+
+  // For pending request display
+  const reqCategory = pendingReq ? gameState.categories[pendingReq.col] : ''
+  const reqPoints = pendingReq ? gameState.pointValues[pendingReq.row] : 0
 
   return (
     <div className="admin-panel">
@@ -111,6 +186,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
           { id: 'game',     label: 'Game Control' },
           { id: 'edit',     label: 'Edit Board' },
           { id: 'players',  label: 'Players' },
+          { id: 'sessions', label: 'Sessions' },
           { id: 'settings', label: 'Settings' },
         ].map(t => (
           <button
@@ -119,6 +195,9 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
             onClick={() => setTab(t.id)}
           >
             {t.label}
+            {t.id === 'game' && pendingReq && (
+              <span className="tab-badge">!</span>
+            )}
           </button>
         ))}
       </div>
@@ -128,6 +207,32 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
         {/* ── Game Control ── */}
         {tab === 'game' && (
           <div>
+            {/* Pending cell request banner */}
+            {pendingReq && !activeCell && (
+              <div className="pending-request-banner">
+                <div className="pending-request-info">
+                  <span className="pending-request-player">{pendingReq.playerName}</span>
+                  <span className="pending-request-text">
+                    wants to open <strong>{reqCategory}</strong> for <strong>${reqPoints}</strong>
+                  </span>
+                </div>
+                <div className="pending-request-actions">
+                  <button
+                    className="admin-btn green"
+                    onClick={() => send({ type: 'approve_cell_request' })}
+                  >
+                    ✓ Allow
+                  </button>
+                  <button
+                    className="admin-btn red"
+                    onClick={() => send({ type: 'deny_cell_request' })}
+                  >
+                    ✗ Deny
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Turn Control */}
             {gameState.players.length > 0 && (
               <div className="turn-control">
@@ -183,7 +288,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
             )}
 
             <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
-              Click a cell to open its question for all viewers.
+              Click a cell to open its question for all viewers. Players on their turn can also request cells.
             </p>
 
             <div className="admin-board-wrap">
@@ -242,6 +347,12 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
         {/* ── Edit Board ── */}
         {tab === 'edit' && (
           <div>
+            {!gameState.currentSessionId && (
+              <div className="no-session-notice">
+                No active session — image uploads are disabled. Create a session in the Sessions tab first.
+              </div>
+            )}
+
             <div className="point-vals-row">
               <span style={{ color: '#ffdd00', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>Point values:</span>
               {gameState.pointValues.map((val, i) => (
@@ -260,12 +371,15 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
             </div>
 
             <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
-              Edit category names inline. Click a cell to set its question &amp; answer.
+              Edit category names inline. Click a cell to set its question, answer &amp; image.
               Green border = has content.
             </p>
 
             <div className="admin-board-wrap">
-              <div className="admin-board-grid">
+              <div
+                className="admin-board-grid"
+                style={{ gridTemplateColumns: `repeat(${gameState.categories.length}, minmax(90px, 1fr)) 36px` }}
+              >
                 {gameState.categories.map((cat, col) => (
                   <input
                     key={col}
@@ -280,12 +394,19 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     placeholder={`Category ${col + 1}`}
                   />
                 ))}
+                <button
+                  className="admin-add-btn"
+                  title="Add column"
+                  onClick={() => send({ type: 'add_column' })}
+                  style={{ gridRow: 1 }}
+                >+</button>
 
-                {gameState.pointValues.map((points, row) =>
-                  gameState.categories.map((_, col) => {
+                {gameState.pointValues.map((points, row) => [
+                  ...gameState.categories.map((_, col) => {
                     const key = `${col}-${row}`
                     const cell = gameState.cells[key]
                     const hasContent = !!(cell?.question || cell?.answer)
+                    const hasImage = !!cell?.image
                     const isActive = activeCell?.col === col && activeCell?.row === row
                     return (
                       <button
@@ -294,15 +415,25 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                           'admin-cell-btn',
                           cell?.answered ? 'answered' : '',
                           hasContent ? 'has-content' : '',
+                          hasImage ? 'has-image' : '',
                           isActive ? 'active' : '',
                         ].filter(Boolean).join(' ')}
                         onClick={() => openCellEdit(col, row)}
                       >
                         ${points}
+                        {hasImage && <span className="cell-img-icon">🖼</span>}
                       </button>
                     )
-                  })
-                )}
+                  }),
+                  row === gameState.pointValues.length - 1
+                    ? <button
+                        key="add-row"
+                        className="admin-add-btn admin-add-row-btn"
+                        title="Add row"
+                        onClick={() => send({ type: 'add_row' })}
+                      >+</button>
+                    : <div key={`spacer-${row}`} />
+                ])}
               </div>
             </div>
 
@@ -332,6 +463,32 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 placeholder="Enter the correct answer (revealed only when you choose)…"
                 rows={2}
               />
+              <label>Image</label>
+              {gameState.finalJeopardy?.image ? (
+                <div className="cell-image-preview">
+                  <img src={gameState.finalJeopardy.image} alt="preview" className="cell-image-preview-img" />
+                  <button className="admin-btn red" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }} onClick={removeFjImage}>
+                    ✕ Remove Image
+                  </button>
+                </div>
+              ) : (
+                <p style={{ color: 'rgba(245,237,218,0.35)', fontSize: '0.8rem', margin: '0.3rem 0 0.5rem' }}>
+                  No image set
+                </p>
+              )}
+              {gameState.currentSessionId ? (
+                <input
+                  ref={fjImgFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="cell-file-input"
+                  onChange={handleFjImageSelect}
+                />
+              ) : (
+                <p style={{ color: 'rgba(212,122,42,0.9)', fontSize: '0.8rem', marginTop: '0.4rem' }}>
+                  Create a session to enable image uploads.
+                </p>
+              )}
             </div>
 
             {editingCell && (
@@ -357,6 +514,35 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     placeholder="Enter the correct answer (shown only to admin)..."
                     rows={2}
                   />
+
+                  <label>Image</label>
+                  {editImg ? (
+                    <div className="cell-image-preview">
+                      <img src={editImg} alt="preview" className="cell-image-preview-img" />
+                      <button className="admin-btn red" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }} onClick={removeImage}>
+                        ✕ Remove Image
+                      </button>
+                    </div>
+                  ) : (
+                    <p style={{ color: 'rgba(245,237,218,0.35)', fontSize: '0.8rem', margin: '0.3rem 0 0.5rem' }}>
+                      No image set
+                    </p>
+                  )}
+
+                  {gameState.currentSessionId ? (
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="cell-file-input"
+                      onChange={handleImageSelect}
+                    />
+                  ) : (
+                    <p style={{ color: 'rgba(212,122,42,0.9)', fontSize: '0.8rem', marginTop: '0.4rem' }}>
+                      Create a session to enable image uploads.
+                    </p>
+                  )}
+
                   <div className="cell-modal-actions">
                     <button className="admin-btn red" onClick={() => setEditingCell(null)}>Cancel</button>
                     <button className="admin-btn green" onClick={saveCell}>Save</button>
@@ -445,6 +631,81 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
           </div>
         )}
 
+        {/* ── Sessions ── */}
+        {tab === 'sessions' && (
+          <div>
+            <p style={{ color: 'rgba(245,237,218,0.45)', fontSize: '0.85rem', marginBottom: '1rem' }}>
+              Sessions organize uploaded images into folders. The active session is where new images are saved.
+              Players can only join when a session is active.
+            </p>
+
+            <div className="add-player-row" style={{ marginBottom: '1.5rem' }}>
+              <input
+                type="text"
+                className="admin-input"
+                value={newSessionName}
+                onChange={e => setNewSessionName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createSession()}
+                placeholder="Session name (e.g. Game Night #3)"
+              />
+              <button className="admin-btn green" onClick={createSession}>
+                + New Session
+              </button>
+            </div>
+
+            {gameState.sessions.length === 0 ? (
+              <div className="sessions-empty">
+                <p>No sessions yet.</p>
+                <p style={{ fontSize: '0.85rem', opacity: 0.6, marginTop: '0.5rem' }}>
+                  Create one above to enable player joining and image uploads.
+                </p>
+              </div>
+            ) : (
+              <div className="sessions-list">
+                {gameState.sessions.map(s => {
+                  const isActive = s.id === gameState.currentSessionId
+                  return (
+                    <div key={s.id} className={`session-item ${isActive ? 'session-active' : ''}`}>
+                      <div className="session-item-info">
+                        <span className="session-item-name">{s.name}</span>
+                        <span className="session-item-date">
+                          {new Date(s.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="session-item-actions">
+                        {isActive ? (
+                          <span className="session-active-badge">✓ Active</span>
+                        ) : (
+                          <>
+                            <button
+                              className="admin-btn blue"
+                              style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}
+                              onClick={() => send({ type: 'set_current_session', id: s.id })}
+                            >
+                              Set Active
+                            </button>
+                            <button
+                              className="admin-btn red"
+                              style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem', marginLeft: '0.5rem' }}
+                              onClick={() => {
+                                if (confirm(`Delete session "${s.name}"? This removes all its uploaded images.`)) {
+                                  send({ type: 'delete_session', id: s.id })
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Settings ── */}
         {tab === 'settings' && (
           <div>
@@ -473,7 +734,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                   <button className="admin-btn red" onClick={fullReset}>Full Game Reset</button>
                 </div>
                 <p className="hint-text" style={{ marginTop: '0.75rem' }}>
-                  Full reset clears questions, players, scores, and buzzers.
+                  Full reset clears questions, players, scores, and buzzers. Sessions and uploaded images are kept.
                 </p>
               </div>
             </div>
