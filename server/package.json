@@ -1,0 +1,12 @@
+{
+  "name": "openjeopardy-server",
+  "private": true,
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.1"
+  }
+}
