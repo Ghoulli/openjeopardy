@@ -71,3 +71,8 @@ client/dist/             Built output served by Express — NOT in git
 ## What's internet-facing
 
 This is deployed publicly. Changes to auth, WebSocket handling, or file upload code need security review. Images are served from `server/uploads/` via Express static middleware.
+
+## Maintenance rules
+
+- **README.md** — keep it up to date whenever site features, Docker usage, environment variables, or architecture change. It is the primary user-facing documentation.
+- **.gitignore** — update it whenever new build artifacts, runtime files, secrets, or editor/OS patterns are introduced that should not be committed.

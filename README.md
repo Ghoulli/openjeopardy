@@ -1,0 +1,155 @@
+# OpenJeopardy
+
+A browser-based Jeopardy game with a real-time WebSocket backend. Supports multiple simultaneous viewers, a buzzer system, image clues, sessions, and a full admin control panel.
+
+---
+
+## Quick start with Docker
+
+```bash
+docker build -t openjeopardy .
+docker run -d \
+  -p 3001:3001 \
+  -e ADMIN_PASSWORD=yourpassword \
+  -v openjeopardy-uploads:/app/server/uploads \
+  --name openjeopardy \
+  openjeopardy
+```
+
+Open **http://localhost:3001** in a browser.
+
+> **Security:** Always set `ADMIN_PASSWORD`. Without it the server starts with the default password `jeopardy` and warns you on stdout. For HTTPS deployments, put a reverse proxy (nginx, Caddy) in front — the WebSocket client auto-switches to `wss://` when served over HTTPS.
+
+### Persist uploads across restarts
+
+The `-v openjeopardy-uploads:/app/server/uploads` flag maps a named Docker volume to the uploads directory. Remove it if you don't need image persistence.
+
+### Stop / remove
+
+```bash
+docker stop openjeopardy && docker rm openjeopardy
+```
+
+---
+
+## Manual setup (dev machine)
+
+Requires VS Code's bundled Electron as Node (no system Node needed) and [pnpm](https://pnpm.io).
+
+```bash
+# Install server deps
+cd server && pnpm install
+
+# Install client deps
+cd ../client && pnpm install
+
+# Build the client
+ELECTRON_RUN_AS_NODE=1 /usr/share/code/code \
+  node_modules/.pnpm/vite@5.4.21/node_modules/vite/bin/vite.js build
+
+# Start the server
+cd .. && ./start.sh
+```
+
+Server listens on **http://localhost:3001**.
+
+---
+
+## Site functions
+
+### Player view
+
+| Feature | How it works |
+|---------|-------------|
+| **Join screen** | Players enter a name. A session must be active before joining is possible. |
+| **Game board** | Jeopardy grid of categories × point values. Answered cells are dimmed. |
+| **Turn system** | The admin designates whose turn it is. Only the active player can request to open a cell; others see a "not your turn" toast. |
+| **Cell request** | Active player clicks a cell → request is sent to admin for approval or denial. |
+| **Question modal** | When admin opens a cell, the question/clue (and optional image) appear as an overlay for all viewers simultaneously. |
+| **Buzzer** | When the buzzer is active, players press **Space** (or the on-screen button) to buzz in. The first buzz is highlighted; subsequent buzzes show millisecond deltas. |
+| **Scoreboard** | Live score strip across the top of the board, with the active player highlighted. |
+| **Final Jeopardy page** | Navigating to `/final` shows a dedicated full-screen Final Jeopardy display. |
+
+---
+
+### Admin panel (`/` → log in with admin password)
+
+The admin panel has five tabs:
+
+#### Game Control tab
+
+- **Turn management** — buttons to set the active player or cycle to the next one.
+- **Pending request banner** — appears when a player requests a cell; admin approves or denies.
+- **Buzzer controls** — Activate Buzzer, Stop Buzzer, Reset Buzzers. Buzz order and ms deltas display live.
+- **Open a cell** — admin can click any cell directly to open it for all viewers, bypassing the turn system.
+- **Mark Answered / Close Question** — mark a cell done (dims it on the board) or close without marking.
+- **Unmark a cell** — right-click (or long-press) an answered cell in admin view to restore it.
+- **Final Jeopardy controls** — Reveal/hide the answer, open the `/final` page in a new window, close Final Jeopardy.
+
+#### Edit Board tab
+
+- **Category names** — inline text inputs above each column.
+- **Point values** — editable number inputs per row.
+- **Column count slider** — 1–12 columns; adding columns preserves existing content.
+- **Add Row** — appends a row with the next auto-incremented point value.
+- **Cell editor** — click any cell to set its question text, answer text, and an optional image (PNG, JPEG, GIF, WebP; max 5 MB). Cells with content show a green border; cells with images show a picture icon.
+- **Final Jeopardy editor** — category name, question/clue, correct answer, and optional image.
+
+#### Players tab
+
+- **Add player** — admin can add players manually (players can also join themselves from the main page).
+- **Score table** — live score for each player with an editable number input.
+- **Quick score buttons** — when a question is open, ±(point value) buttons appear for one-click score adjustment.
+- **Remove player** — removes a player from the current game.
+
+#### Sessions tab
+
+Sessions are named folders that group uploaded images. A session must be active for players to join and for image uploads to work.
+
+- **Create session** — give it a name (e.g. "Game Night #3"); images are saved under `uploads/<session-id>/`.
+- **Set Active** — switch the active session (future uploads go here).
+- **Delete session** — removes the session and all its uploaded images from disk.
+
+#### Settings tab
+
+- **Change admin password** — takes effect immediately; existing browser sessions stay valid until they disconnect or their 24-hour token expires.
+- **Reset All Scores** — zeroes every player's score.
+- **Unmark All Questions** — restores all answered cells to their unanswered state.
+- **Full Game Reset** — clears questions, players, scores, and buzzers. Sessions and uploaded images are kept.
+
+---
+
+### Scoreboard / second-screen view
+
+Navigating to `/?scoreboard` (or opening `Scoreboard.jsx` directly) renders a read-only score display suitable for a projector or secondary monitor. It shows player names and scores with the active player highlighted, and updates in real time.
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_PASSWORD` | `jeopardy` | Password for the admin panel. **Always override this in production.** |
+| `PORT` | `3001` | Port the server listens on. |
+
+---
+
+## Architecture
+
+```
+server/index.js      Express + WebSocket server (single file, no database)
+server/uploads/      Uploaded images, organized by session ID
+client/src/          React frontend (Vite build)
+client/dist/         Built output served by Express
+```
+
+All game state is in-memory on the server and broadcast to every connected client via WebSocket whenever anything changes. There is no persistent storage beyond uploaded image files — a server restart resets the board, players, and scores.
+
+---
+
+## Security notes
+
+- The server is designed to be internet-facing. It enforces rate limiting (60 msg/s per client), a connection cap (60), message size limits (12 MB), image magic-byte validation, and path traversal checks on uploads.
+- Admin login attempts are brute-force-protected: 5 failures per IP triggers a 15-minute block.
+- Admin sessions use short-lived tokens (24 h) so the password is never retransmitted after login.
+- Uploaded images are validated against PNG, JPEG, GIF, and WebP magic bytes before being saved.
