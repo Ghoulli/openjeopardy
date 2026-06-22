@@ -8,6 +8,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
   const [editingCell, setEditingCell] = useState(null)
   const [editQ, setEditQ] = useState('')
   const [editA, setEditA] = useState('')
+  const [editDd, setEditDd] = useState(false)
   const [editImg, setEditImg] = useState(null)       // current image URL or null
   const [editImgFile, setEditImgFile] = useState(null) // new File selected or null
   const [editImgRemove, setEditImgRemove] = useState(false)
@@ -29,6 +30,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     setEditingCell({ col, row })
     setEditQ(cell?.question || '')
     setEditA(cell?.answer || '')
+    setEditDd(!!cell?.dailyDouble)
     setEditImg(cell?.image || null)
     setEditImgFile(null)
     setEditImgRemove(false)
@@ -40,6 +42,11 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     const newCells = { ...gameState.cells }
     newCells[key] = { ...newCells[key], question: editQ, answer: editA }
     send({ type: 'update_board', cells: newCells })
+
+    // Toggle DD if it changed
+    if (editDd !== !!gameState.cells[key]?.dailyDouble) {
+      send({ type: 'toggle_daily_double', col: editingCell.col, row: editingCell.row })
+    }
 
     if (editImgFile) {
       const reader = new FileReader()
@@ -345,6 +352,12 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 onResetBuzzers={() => send({ type: 'reset_buzzers' })}
                 onStopBuzzer={() => send({ type: 'stop_buzzer' })}
                 onMarkAnswered={() => send({ type: 'mark_answered' })}
+                onWrongAnswer={() => send({ type: 'wrong_answer' })}
+                isDailyDouble={!!activeCellData.dailyDouble}
+                dailyDoubleWager={gameState.dailyDoubleWager}
+                activePlayerName={gameState.activePlayerName}
+                isActivePlayer={false}
+                onSetWager={wager => send({ type: 'set_daily_double_wager', wager })}
               />
             )}
           </div>
@@ -443,11 +456,13 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                           cell?.answered ? 'answered' : '',
                           hasContent ? 'has-content' : '',
                           hasImage ? 'has-image' : '',
+                          cell?.dailyDouble ? 'daily-double' : '',
                           isActive ? 'active' : '',
                         ].filter(Boolean).join(' ')}
                         onClick={() => openCellEdit(col, row)}
                       >
                         ${points}
+                        {cell?.dailyDouble && <span className="cell-dd-icon">DD</span>}
                         {hasImage && <span className="cell-img-icon">🖼</span>}
                       </button>
                     )
@@ -539,6 +554,17 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     placeholder="Enter the correct answer (shown only to admin)..."
                     rows={2}
                   />
+
+                  <label className="dd-toggle-label">
+                    <input
+                      type="checkbox"
+                      className="dd-toggle-checkbox"
+                      checked={editDd}
+                      onChange={e => setEditDd(e.target.checked)}
+                    />
+                    Daily Double
+                    <span className="dd-toggle-hint">Player wagers before seeing the question</span>
+                  </label>
 
                   <label>Image</label>
                   {editImg ? (

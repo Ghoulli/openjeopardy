@@ -7,6 +7,7 @@ import FinalJeopardyPage from './components/FinalJeopardyPage'
 import Scoreboard from './components/Scoreboard'
 import SetupView from './components/SetupView'
 import ProfileModal from './components/ProfileModal'
+import EmojiPicker from './components/EmojiPicker'
 import { WS_URL } from './config'
 import { useBuzzerSound } from './hooks/useBuzzerSound'
 
@@ -25,6 +26,8 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false)
   const [newAchievements, setNewAchievements] = useState([])
   const [playerAvatarUrl, setPlayerAvatarUrl] = useState(null)
+  const [reactions, setReactions] = useState([])
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   const playBuzz = useBuzzerSound()
   const prevBuzzLenRef = useRef(0)
@@ -86,6 +89,12 @@ export default function App() {
         case 'avatar_updated':
           setPlayerAvatarUrl(msg.avatarUrl)
           break
+        case 'player_reaction': {
+          const rid = Date.now() + Math.random()
+          setReactions(prev => [...prev, { id: rid, playerName: msg.playerName, emoji: msg.emoji }])
+          setTimeout(() => setReactions(prev => prev.filter(r => r.id !== rid)), 3000)
+          break
+        }
         case 'stats_updated':
           setPlayerStats(msg.stats)
           setPlayerAchievements(msg.achievements || [])
@@ -191,6 +200,8 @@ export default function App() {
     setPlayerAvatarUrl(null)
     setShowProfile(false)
     setNewAchievements([])
+    setReactions([])
+    setShowEmojiPicker(false)
     setView('setup')
   }
 
@@ -263,7 +274,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="game-wrap">
-        <Scoreboard players={gameState.players} activePlayerName={gameState.activePlayerName} />
+        <Scoreboard players={gameState.players} activePlayerName={gameState.activePlayerName} reactions={reactions} />
         <Board
           gameState={gameState}
           isAdmin={false}
@@ -322,6 +333,12 @@ export default function App() {
           onActivateBuzzer={null}
           onResetBuzzers={null}
           onMarkAnswered={null}
+          onWrongAnswer={null}
+          isDailyDouble={!!activeCellData.dailyDouble}
+          dailyDoubleWager={gameState.dailyDoubleWager}
+          activePlayerName={gameState.activePlayerName}
+          isActivePlayer={playerUsername === gameState.activePlayerName}
+          onSetWager={wager => send({ type: 'set_daily_double_wager', wager })}
         />
       )}
 
@@ -335,6 +352,17 @@ export default function App() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Emoji reaction picker */}
+      {showEmojiPicker && (
+        <EmojiPicker
+          onSelect={emoji => {
+            send({ type: 'player_reaction', emoji })
+            setShowEmojiPicker(false)
+          }}
+          onClose={() => setShowEmojiPicker(false)}
+        />
       )}
 
       {/* Profile modal */}
@@ -354,6 +382,9 @@ export default function App() {
         {playerUsername || 'Profile'}
       </button>
       <button className="leave-btn" onClick={handleLeave}>Leave</button>
+      <button className="emoji-btn" onClick={() => setShowEmojiPicker(v => !v)} title="React with emoji">
+        😀
+      </button>
       <span className={`ws-badge ${wsStatus}`}>{wsStatus}</span>
     </div>
   )
