@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import BuzzerDisplay from './BuzzerDisplay'
 
 export default function QuestionModal({
@@ -7,21 +7,40 @@ export default function QuestionModal({
   onClose, onActivateBuzzer, onResetBuzzers, onStopBuzzer, onMarkAnswered,
   isDailyDouble, dailyDoubleWager, activePlayerName, isActivePlayer,
   onSetWager, onWrongAnswer,
+  drawingCarousel, onUploadDrawing, onSetCarouselIndex,
 }) {
   const [showAnswer, setShowAnswer] = useState(false)
   const [wagerInput, setWagerInput] = useState('')
+  const [lightbox, setLightbox] = useState(null)
+  const drawingFileRef = useRef(null)
 
   if (!cell) return null
 
   const hasImage = !!cell.image
   const ddWagerPhase = isDailyDouble && dailyDoubleWager == null
   const ddQuestionPhase = isDailyDouble && dailyDoubleWager != null
+  const isDrawing = cell.type === 'drawing'
 
   function submitWager() {
     const w = parseInt(wagerInput)
     if (!isFinite(w) || w < 1) return
     onSetWager(w)
     setWagerInput('')
+  }
+
+  function handleDrawingUpload(e) {
+    const file = e.target.files[0]
+    if (!file || !onUploadDrawing) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const dataUrl = ev.target.result
+      const comma = dataUrl.indexOf(',')
+      const base64 = dataUrl.slice(comma + 1)
+      const mimeType = dataUrl.slice(0, comma).match(/:(.*?);/)[1]
+      onUploadDrawing(base64, mimeType)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   // ── Daily Double: wager phase ──────────────────────────────────────────────
@@ -69,8 +88,129 @@ export default function QuestionModal({
     )
   }
 
+  // ── Drawing question type ──────────────────────────────────────────────────
+  if (isDrawing) {
+    const carousel = drawingCarousel || { images: [], currentIndex: -1 }
+    const { images, currentIndex } = carousel
+    const inCarousel = currentIndex >= 0 && images.length > 0
+    const currentImage = inCarousel ? images[currentIndex] : null
+
+    if (inCarousel && currentImage) {
+      // Synchronized carousel mode — all viewers see the same image
+      return (
+        <>
+          <div className="modal-overlay">
+            <div className="modal drawing-carousel-modal">
+              <div className="modal-meta">{category}</div>
+              <div className="modal-points">${pointValue}</div>
+
+              <div className="carousel-image-wrap" onClick={() => setLightbox(currentImage.url)}>
+                <img src={currentImage.url} alt={currentImage.playerName} className="carousel-image" />
+              </div>
+              <div className="carousel-player-name">{currentImage.playerName}</div>
+              <div className="carousel-counter">{currentIndex + 1} / {images.length}</div>
+
+              {isAdmin && (
+                <div className="modal-controls">
+                  {currentIndex > 0 && (
+                    <button className="btn-ctrl white" onClick={() => onSetCarouselIndex(currentIndex - 1)}>
+                      ← Prev
+                    </button>
+                  )}
+                  <button
+                    className="btn-ctrl green"
+                    onClick={() => onSetCarouselIndex(currentIndex < images.length - 1 ? currentIndex + 1 : -1)}
+                  >
+                    {currentIndex < images.length - 1 ? 'Next →' : '✓ Done'}
+                  </button>
+                  <button className="btn-ctrl yellow" onClick={() => onSetCarouselIndex(-1)}>
+                    ☰ Gallery
+                  </button>
+                  <button className="btn-ctrl green" onClick={onMarkAnswered}>✓ Mark Answered</button>
+                  <button className="btn-ctrl white" onClick={onClose}>✗ Close</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {lightbox && (
+            <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
+              <img src={lightbox} alt="" className="lightbox-image" />
+            </div>
+          )}
+        </>
+      )
+    }
+
+    // Gallery / upload mode
+    return (
+      <>
+        <div className="modal-overlay">
+          <div className="modal drawing-gallery-modal">
+            <div className="modal-meta">{category}</div>
+            <div className="modal-points">${pointValue}</div>
+
+            <div className="modal-question">
+              {cell.question || <em style={{ opacity: 0.5 }}>No question set</em>}
+            </div>
+
+            {!isAdmin && onUploadDrawing && (
+              <div className="drawing-upload-section">
+                <button
+                  className="drawing-upload-btn"
+                  onClick={() => drawingFileRef.current?.click()}
+                >
+                  + Upload your drawing
+                </button>
+                <input
+                  ref={drawingFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={handleDrawingUpload}
+                />
+              </div>
+            )}
+
+            {images.length > 0 ? (
+              <div className="drawing-gallery">
+                {images.map((img, i) => (
+                  <div key={i} className="drawing-gallery-item" onClick={() => setLightbox(img.url)}>
+                    <img src={img.url} alt={img.playerName} className="drawing-gallery-thumb" />
+                    <div className="drawing-gallery-name">{img.playerName}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="drawing-waiting">Waiting for drawings…</div>
+            )}
+
+            {isAdmin && (
+              <div className="modal-controls">
+                {images.length > 0 && (
+                  <button className="btn-ctrl green" onClick={() => onSetCarouselIndex(0)}>
+                    ▶ Slideshow ({images.length})
+                  </button>
+                )}
+                <button className="btn-ctrl green" onClick={onMarkAnswered}>✓ Mark Answered</button>
+                <button className="btn-ctrl white" onClick={onClose}>✗ Close</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {lightbox && (
+          <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
+            <img src={lightbox} alt="" className="lightbox-image" />
+          </div>
+        )}
+      </>
+    )
+  }
+
   // ── Normal or Daily Double question phase ─────────────────────────────────
   return (
+    <>
     <div className="modal-overlay">
       <div className="modal">
         {ddQuestionPhase ? (
@@ -91,7 +231,7 @@ export default function QuestionModal({
               {cell.question || <em style={{ opacity: 0.5 }}>No question set</em>}
             </div>
             <div className="modal-image-wrap">
-              <img src={cell.image} alt="" className="modal-image" />
+              <img src={cell.image} alt="" className="modal-image modal-image-clickable" onClick={() => setLightbox(cell.image)} />
             </div>
           </div>
         ) : (
@@ -162,5 +302,12 @@ export default function QuestionModal({
         )}
       </div>
     </div>
+
+    {lightbox && (
+      <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
+        <img src={lightbox} alt="" className="lightbox-image" />
+      </div>
+    )}
+  </>
   )
 }

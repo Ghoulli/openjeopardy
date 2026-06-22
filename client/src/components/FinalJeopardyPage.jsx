@@ -1,5 +1,16 @@
+import EndScreen from './EndScreen'
+
 export default function FinalJeopardyPage({ gameState, wsStatus }) {
   const fj = gameState?.finalJeopardy || {}
+
+  if (fj.showEndScreen && fj.endScreen) {
+    return (
+      <div className="fj-page fj-page-end">
+        <EndScreen endScreen={fj.endScreen} />
+        <span className={`ws-badge ${wsStatus}`}>{wsStatus}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="fj-page">

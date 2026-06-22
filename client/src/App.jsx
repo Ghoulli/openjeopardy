@@ -8,6 +8,7 @@ import Scoreboard from './components/Scoreboard'
 import SetupView from './components/SetupView'
 import ProfileModal from './components/ProfileModal'
 import EmojiPicker from './components/EmojiPicker'
+import EndScreen from './components/EndScreen'
 import { WS_URL } from './config'
 import { useBuzzerSound } from './hooks/useBuzzerSound'
 
@@ -339,6 +340,9 @@ export default function App() {
           activePlayerName={gameState.activePlayerName}
           isActivePlayer={playerUsername === gameState.activePlayerName}
           onSetWager={wager => send({ type: 'set_daily_double_wager', wager })}
+          drawingCarousel={gameState.drawingCarousel}
+          onUploadDrawing={(imageBase64, mimeType) => send({ type: 'upload_drawing', imageBase64, mimeType })}
+          onSetCarouselIndex={null}
         />
       )}
 
@@ -375,6 +379,13 @@ export default function App() {
           send={send}
           onClose={() => setShowProfile(false)}
         />
+      )}
+
+      {/* End screen overlay */}
+      {gameState.finalJeopardy?.showEndScreen && gameState.finalJeopardy?.endScreen && (
+        <div className="end-screen-overlay">
+          <EndScreen endScreen={gameState.finalJeopardy.endScreen} />
+        </div>
       )}
 
       <button className="profile-btn" onClick={() => setShowProfile(true)}>

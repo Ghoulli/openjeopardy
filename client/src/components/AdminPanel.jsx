@@ -9,6 +9,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
   const [editQ, setEditQ] = useState('')
   const [editA, setEditA] = useState('')
   const [editDd, setEditDd] = useState(false)
+  const [editType, setEditType] = useState('text')
   const [editImg, setEditImg] = useState(null)       // current image URL or null
   const [editImgFile, setEditImgFile] = useState(null) // new File selected or null
   const [editImgRemove, setEditImgRemove] = useState(false)
@@ -31,6 +32,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     setEditQ(cell?.question || '')
     setEditA(cell?.answer || '')
     setEditDd(!!cell?.dailyDouble)
+    setEditType(cell?.type || 'text')
     setEditImg(cell?.image || null)
     setEditImgFile(null)
     setEditImgRemove(false)
@@ -46,6 +48,11 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     // Toggle DD if it changed
     if (editDd !== !!gameState.cells[key]?.dailyDouble) {
       send({ type: 'toggle_daily_double', col: editingCell.col, row: editingCell.row })
+    }
+
+    // Toggle drawing type if it changed
+    if (editType !== (gameState.cells[key]?.type || 'text')) {
+      send({ type: 'toggle_drawing_type', col: editingCell.col, row: editingCell.row })
     }
 
     if (editImgFile) {
@@ -139,7 +146,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
     if (!newPw.trim()) return
     send({ type: 'update_password', password: newPw.trim() })
     setNewPw('')
-    alert('Password updated! Existing admin sessions remain valid until they disconnect.')
+    alert('Password updated! All admin sessions are revoked — reconnecting will require the new password.')
   }
 
   function resetScores() {
@@ -331,6 +338,13 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                   Open Final Page
                 </button>
                 <button
+                  className="admin-btn"
+                  style={{ background: '#0a2010', color: '#60d080', borderColor: 'rgba(60,180,80,0.4)' }}
+                  onClick={() => send({ type: gameState.finalJeopardy?.showEndScreen ? 'hide_end_screen' : 'show_end_screen' })}
+                >
+                  {gameState.finalJeopardy?.showEndScreen ? 'Hide End Screen' : 'Show End Screen'}
+                </button>
+                <button
                   className="admin-btn red"
                   onClick={() => send({ type: 'close_final_jeopardy' })}
                 >
@@ -358,6 +372,9 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 activePlayerName={gameState.activePlayerName}
                 isActivePlayer={false}
                 onSetWager={wager => send({ type: 'set_daily_double_wager', wager })}
+                drawingCarousel={gameState.drawingCarousel}
+                onUploadDrawing={null}
+                onSetCarouselIndex={idx => send({ type: 'set_carousel_index', index: idx })}
               />
             )}
           </div>
@@ -448,6 +465,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     const hasContent = !!(cell?.question || cell?.answer)
                     const hasImage = !!cell?.image
                     const isActive = activeCell?.col === col && activeCell?.row === row
+                    const isDrawingType = cell?.type === 'drawing'
                     return (
                       <button
                         key={key}
@@ -457,12 +475,14 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                           hasContent ? 'has-content' : '',
                           hasImage ? 'has-image' : '',
                           cell?.dailyDouble ? 'daily-double' : '',
+                          isDrawingType ? 'drawing-type' : '',
                           isActive ? 'active' : '',
                         ].filter(Boolean).join(' ')}
                         onClick={() => openCellEdit(col, row)}
                       >
                         ${points}
                         {cell?.dailyDouble && <span className="cell-dd-icon">DD</span>}
+                        {isDrawingType && <span className="cell-drawing-icon">✏</span>}
                         {hasImage && <span className="cell-img-icon">🖼</span>}
                       </button>
                     )
@@ -566,32 +586,51 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                     <span className="dd-toggle-hint">Player wagers before seeing the question</span>
                   </label>
 
-                  <label>Image</label>
-                  {editImg ? (
-                    <div className="cell-image-preview">
-                      <img src={editImg} alt="preview" className="cell-image-preview-img" />
-                      <button className="admin-btn red" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }} onClick={removeImage}>
-                        ✕ Remove Image
-                      </button>
-                    </div>
-                  ) : (
-                    <p style={{ color: 'rgba(245,237,218,0.35)', fontSize: '0.8rem', margin: '0.3rem 0 0.5rem' }}>
-                      No image set
-                    </p>
-                  )}
-
-                  {gameState.currentSessionId ? (
+                  <label className="dd-toggle-label">
                     <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="cell-file-input"
-                      onChange={handleImageSelect}
+                      type="checkbox"
+                      className="dd-toggle-checkbox"
+                      checked={editType === 'drawing'}
+                      onChange={e => setEditType(e.target.checked ? 'drawing' : 'text')}
                     />
-                  ) : (
-                    <p style={{ color: 'rgba(212,122,42,0.9)', fontSize: '0.8rem', marginTop: '0.4rem' }}>
-                      Create a session to enable image uploads.
+                    Drawing Question
+                    <span className="dd-toggle-hint">Players upload drawings; admin shows them as a slideshow</span>
+                  </label>
+
+                  {editType === 'drawing' ? (
+                    <p style={{ color: 'rgba(245,237,218,0.35)', fontSize: '0.8rem', margin: '0.3rem 0 0.5rem' }}>
+                      Drawing question — players upload their own drawings during the game.
                     </p>
+                  ) : (
+                    <>
+                      <label>Image</label>
+                      {editImg ? (
+                        <div className="cell-image-preview">
+                          <img src={editImg} alt="preview" className="cell-image-preview-img" />
+                          <button className="admin-btn red" style={{ marginTop: '0.5rem', fontSize: '0.8rem' }} onClick={removeImage}>
+                            ✕ Remove Image
+                          </button>
+                        </div>
+                      ) : (
+                        <p style={{ color: 'rgba(245,237,218,0.35)', fontSize: '0.8rem', margin: '0.3rem 0 0.5rem' }}>
+                          No image set
+                        </p>
+                      )}
+
+                      {gameState.currentSessionId ? (
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="cell-file-input"
+                          onChange={handleImageSelect}
+                        />
+                      ) : (
+                        <p style={{ color: 'rgba(212,122,42,0.9)', fontSize: '0.8rem', marginTop: '0.4rem' }}>
+                          Create a session to enable image uploads.
+                        </p>
+                      )}
+                    </>
                   )}
 
                   <div className="cell-modal-actions">

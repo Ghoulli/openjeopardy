@@ -1104,6 +1104,27 @@ body {
   box-shadow: 0 4px 18px rgba(0,0,0,0.55);
   display: block;
 }
+.modal-image-clickable {
+  cursor: zoom-in;
+}
+
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox-image {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.8);
+}
 
 /* ── Turn indicator (player board) ── */
 .turn-indicator {
@@ -1944,4 +1965,328 @@ body {
     right: 0.75rem;
     bottom: 5.5rem;
   }
+}
+
+/* ── Drawing question carousel & gallery ── */
+
+/* Edit board cell indicator */
+.admin-cell-btn.drawing-type {
+  border-color: rgba(160,80,240,0.7);
+}
+.cell-drawing-icon {
+  display: block;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: #c080ff;
+  margin-top: 0.1rem;
+}
+
+/* Carousel modal */
+.drawing-carousel-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+.carousel-image-wrap {
+  width: 100%;
+  max-height: 55vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.35);
+}
+.carousel-image {
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+  border-radius: 8px;
+  display: block;
+}
+.carousel-player-name {
+  font-size: 1.05rem;
+  color: var(--gold-light);
+  letter-spacing: 0.04em;
+}
+.carousel-counter {
+  font-size: 0.8rem;
+  color: var(--cream-dim);
+}
+
+/* Gallery modal */
+.drawing-gallery-modal {
+  width: 100%;
+}
+.drawing-upload-section {
+  margin: 0.75rem 0;
+  display: flex;
+  justify-content: center;
+}
+.drawing-upload-btn {
+  background: rgba(58,170,88,0.12);
+  border: 1px solid rgba(58,170,88,0.5);
+  color: #7ae89a;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.drawing-upload-btn:hover {
+  background: rgba(58,170,88,0.22);
+  border-color: rgba(58,170,88,0.8);
+}
+.drawing-waiting {
+  text-align: center;
+  padding: 1.5rem 0;
+  color: var(--cream-dim);
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+}
+.drawing-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  max-height: 45vh;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+.drawing-gallery-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 0.3rem;
+  border: 1px solid rgba(245,237,218,0.1);
+  transition: border-color 0.15s, background 0.15s;
+}
+.drawing-gallery-item:hover {
+  border-color: rgba(201,164,42,0.5);
+  background: rgba(201,164,42,0.07);
+}
+.drawing-gallery-thumb {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.3);
+}
+.drawing-gallery-name {
+  font-size: 0.65rem;
+  color: var(--cream-dim);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ── End Screen ── */
+.end-screen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% 35%, rgba(70,10,140,0.6) 0%, transparent 70%),
+    rgba(5,8,40,0.97);
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+}
+.fj-page-end {
+  justify-content: flex-start;
+  padding-top: 1.5rem;
+}
+.end-screen {
+  width: 100%;
+  max-width: 1100px;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+}
+.end-screen-title {
+  font-family: 'Cinzel Decorative', 'Cinzel', 'Arial Black', serif;
+  font-size: clamp(2.5rem, 8vw, 5rem);
+  font-weight: 900;
+  background: linear-gradient(160deg, #ffe680 10%, #c9a42a 45%, #ffe680 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.04em;
+  filter: drop-shadow(0 2px 22px rgba(201,164,42,0.55));
+  animation: fj-title-glow 3s ease-in-out infinite;
+}
+
+/* Podium */
+.end-podium {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1.25rem;
+  width: 100%;
+}
+.end-podium-place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  max-width: 220px;
+}
+.end-podium-medal { font-size: 2.2rem; }
+.end-podium-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(201,164,42,0.5);
+}
+.end-podium-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--cream);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.end-podium-score {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--gold-light);
+}
+.end-podium-block {
+  width: 100%;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, rgba(201,164,42,0.25) 0%, rgba(201,164,42,0.08) 100%);
+  border: 1px solid rgba(201,164,42,0.3);
+  border-bottom: none;
+}
+.end-podium-place-1 .end-podium-block { height: 120px; }
+.end-podium-place-2 .end-podium-block { height: 80px; }
+.end-podium-place-3 .end-podium-block { height: 50px; }
+.end-podium-place-1 .end-podium-score { color: #ffe680; font-size: 1.85rem; }
+.end-podium-place-2 .end-podium-score { color: #d0d8e8; }
+.end-podium-place-3 .end-podium-score { color: #c8a060; }
+
+/* Additional standings */
+.end-standings {
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.end-standings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 1rem;
+  background: rgba(13,20,80,0.4);
+  border: 1px solid rgba(201,164,42,0.15);
+  border-radius: 8px;
+}
+.end-standings-rank { color: var(--cream-dim); font-size: 0.85rem; min-width: 2rem; }
+.end-standings-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%; object-fit: cover;
+  border: 1px solid rgba(201,164,42,0.4);
+}
+.end-standings-name { flex: 1; color: var(--cream); font-size: 0.95rem; }
+.end-standings-score { color: var(--gold-light); font-weight: 700; }
+
+/* Awards */
+.end-awards { width: 100%; }
+.end-awards-title {
+  font-family: 'Cinzel', 'Arial Black', serif;
+  font-size: 1.3rem;
+  color: var(--gold-light);
+  text-align: center;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 1rem;
+}
+.end-awards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.end-award-card {
+  background: rgba(13,20,80,0.55);
+  border: 1px solid rgba(201,164,42,0.25);
+  border-radius: 14px;
+  padding: 1.25rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  transition: border-color 0.2s, transform 0.2s;
+  animation: fj-in 0.5s ease-out both;
+}
+.end-award-card:hover { border-color: rgba(201,164,42,0.55); transform: translateY(-2px); }
+.end-award-icon { font-size: 2rem; }
+.end-award-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-light);
+}
+.end-award-player {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--cream);
+}
+.end-award-detail {
+  font-size: 0.8rem;
+  color: var(--cream-dim);
+}
+
+/* Stat table */
+.end-stat-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.end-stat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  color: var(--cream);
+}
+.end-stat-table th {
+  color: var(--gold-light);
+  font-family: 'Cinzel', serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(201,164,42,0.3);
+  text-align: left;
+  white-space: nowrap;
+}
+.end-stat-table td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  white-space: nowrap;
+}
+.end-stat-table tr:hover td { background: rgba(201,164,42,0.06); }
+.end-stat-name { font-weight: 600; }
+.end-stat-neg { color: #ff6b6b; }
+
+@media (max-width: 600px) {
+  .end-podium { gap: 0.75rem; }
+  .end-awards-grid { grid-template-columns: repeat(2, 1fr); }
+  .end-award-card { padding: 0.9rem 0.7rem; }
+  .end-stat-table { font-size: 0.75rem; }
+  .end-stat-table th, .end-stat-table td { padding: 0.35rem 0.5rem; }
 }

@@ -194,7 +194,7 @@ function createDefaultCells(numCols = NUM_COLS, numRows = NUM_ROWS) {
   const cells = {};
   for (let col = 0; col < numCols; col++) {
     for (let row = 0; row < numRows; row++) {
-      cells[`${col}-${row}`] = { question: '', answer: '', answered: false, image: null, dailyDouble: false };
+      cells[`${col}-${row}`] = { question: '', answer: '', answered: false, image: null, dailyDouble: false, type: 'text' };
     }
   }
   return cells;
@@ -215,10 +215,124 @@ let gameState = {
   adminPassword: process.env.ADMIN_PASSWORD || 'jeopardy',
   sessions: [],
   currentSessionId: null,
+  drawingCarousel: { cellKey: null, images: [], currentIndex: -1 },
 };
 
 // Persist scores across reconnects
 const playerScores = {};
+
+// ── Game metrics (tracked within a game, reset on reset_game) ──
+let gameMetrics = {
+  buzzerActivatedAt: null,
+  playerData: {}, // name -> { minScore, maxScore, maxStreak, firstBuzzCount, reactionTimes[] }
+};
+
+function initPlayerMetric(name, score = 0) {
+  if (!gameMetrics.playerData[name]) {
+    gameMetrics.playerData[name] = { minScore: score, maxScore: score, maxStreak: 0, firstBuzzCount: 0, reactionTimes: [] };
+  }
+}
+
+function trackScore(name, score) {
+  initPlayerMetric(name, score);
+  const d = gameMetrics.playerData[name];
+  if (score < d.minScore) d.minScore = score;
+  if (score > d.maxScore) d.maxScore = score;
+}
+
+function trackStreak(name, streak) {
+  initPlayerMetric(name);
+  const d = gameMetrics.playerData[name];
+  if (streak > d.maxStreak) d.maxStreak = streak;
+}
+
+function computeEndScreen() {
+  const players = gameState.players;
+  if (players.length === 0) return { sortedPlayers: [], awards: [], playerStats: [] };
+
+  const sorted = [...players].sort((a, b) => b.score - a.score);
+
+  const stats = players.map(p => {
+    const d = gameMetrics.playerData[p.name] || { minScore: p.score, maxScore: p.score, maxStreak: 0, firstBuzzCount: 0, reactionTimes: [] };
+    const rts = d.reactionTimes;
+    const avgReaction = rts.length > 0 ? Math.round(rts.reduce((s, v) => s + v, 0) / rts.length) : null;
+    const bestReaction = rts.length > 0 ? Math.min(...rts) : null;
+    return {
+      name: p.name,
+      score: p.score,
+      avatarUrl: p.avatarUrl || null,
+      minScore: d.minScore,
+      maxScore: d.maxScore,
+      swing: d.maxScore - d.minScore,
+      comeback: p.score - d.minScore,
+      drop: d.maxScore - p.score,
+      maxStreak: d.maxStreak,
+      currentStreak: p.streak || 0,
+      firstBuzzCount: d.firstBuzzCount,
+      buzzCount: rts.length,
+      avgReaction,
+      bestReaction,
+    };
+  });
+
+  const awards = [];
+  const byScore = [...stats].sort((a, b) => b.score - a.score);
+
+  if (byScore.length > 0) {
+    const w = byScore[0];
+    awards.push({ icon: '🏆', title: 'Champion', player: w.name, detail: `Finished with $${w.score.toLocaleString()}` });
+  }
+
+  const bySwing = [...stats].sort((a, b) => b.swing - a.swing);
+  if (bySwing[0]?.swing >= 400) {
+    const s = bySwing[0];
+    awards.push({ icon: '🎢', title: 'Wild Ride', player: s.name, detail: `$${s.swing.toLocaleString()} total swing` });
+  }
+
+  const byComeback = [...stats].sort((a, b) => b.comeback - a.comeback);
+  if (byComeback[0]?.comeback >= 200) {
+    const c = byComeback[0];
+    const lowFmt = c.minScore < 0 ? `-$${Math.abs(c.minScore).toLocaleString()}` : `$${c.minScore.toLocaleString()}`;
+    awards.push({ icon: '📈', title: 'Comeback Kid', player: c.name, detail: `From ${lowFmt} back to $${c.score.toLocaleString()}` });
+  }
+
+  const byDrop = [...stats].sort((a, b) => b.drop - a.drop);
+  const chokeCandidate = byDrop.find(s => s.drop >= 400 && (byScore.length < 2 || s.name !== byScore[0].name));
+  if (chokeCandidate) {
+    awards.push({ icon: '💸', title: 'So Close…', player: chokeCandidate.name, detail: `Peaked at $${chokeCandidate.maxScore.toLocaleString()}, ended $${chokeCandidate.drop.toLocaleString()} lower` });
+  }
+
+  const byBuzz = [...stats].sort((a, b) => b.firstBuzzCount - a.firstBuzzCount);
+  if (byBuzz[0]?.firstBuzzCount > 0) {
+    const b = byBuzz[0];
+    awards.push({ icon: '⚡', title: 'Buzzer King', player: b.name, detail: `Buzzed first ${b.firstBuzzCount} time${b.firstBuzzCount !== 1 ? 's' : ''}` });
+  }
+
+  const fastBuzzers = stats.filter(s => s.firstBuzzCount > 0 && s.avgReaction !== null);
+  if (fastBuzzers.length > 0) {
+    const fastest = [...fastBuzzers].sort((a, b) => a.avgReaction - b.avgReaction)[0];
+    awards.push({ icon: '🚀', title: 'Fastest Fingers', player: fastest.name, detail: `${(fastest.avgReaction / 1000).toFixed(2)}s avg reaction` });
+  }
+
+  const byStreak = [...stats].sort((a, b) => b.maxStreak - a.maxStreak);
+  if (byStreak[0]?.maxStreak >= 2) {
+    const s = byStreak[0];
+    awards.push({ icon: '🔥', title: 'On Fire', player: s.name, detail: `${s.maxStreak} correct in a row` });
+  }
+
+  if (byScore.length >= 2) {
+    const last = byScore[byScore.length - 1];
+    if (last.score < 0) {
+      awards.push({ icon: '📉', title: 'In the Red', player: last.name, detail: `-$${Math.abs(last.score).toLocaleString()}` });
+    }
+  }
+
+  return {
+    sortedPlayers: sorted.map(p => ({ name: p.name, score: p.score, avatarUrl: p.avatarUrl || null })),
+    awards,
+    playerStats: stats,
+  };
+}
 
 const clients = new Map();
 
@@ -232,7 +346,9 @@ function joinAsPlayer(ws, client, displayName) {
     if (avatarUrl !== null) existing.avatarUrl = avatarUrl;
     gameState.buzzOrder.forEach(b => { if (b.playerName === displayName) b.playerId = client.id; });
   } else {
-    gameState.players.push({ id: client.id, name: displayName, score: playerScores[displayName] || 0, avatarUrl, streak: 0 });
+    const startScore = playerScores[displayName] || 0;
+    gameState.players.push({ id: client.id, name: displayName, score: startScore, avatarUrl, streak: 0 });
+    initPlayerMetric(displayName, startScore);
   }
   broadcast({ type: 'state', gameState: sanitize(gameState) });
   send(ws, { type: 'registered', id: client.id });
@@ -420,7 +536,16 @@ wss.on('connection', (ws, req) => {
         if (!gameState.buzzerActive) return;
         if (gameState.buzzOrder.some(b => b.playerId === client.id)) return;
         const buzzNow = Date.now();
-        const firstTime = gameState.buzzOrder.length > 0 ? gameState.buzzOrder[0].time : buzzNow;
+        const isFirst = gameState.buzzOrder.length === 0;
+        const firstTime = isFirst ? buzzNow : gameState.buzzOrder[0].time;
+        if (gameMetrics.buzzerActivatedAt) {
+          const rt = buzzNow - gameMetrics.buzzerActivatedAt;
+          const pname = client.name || 'Unknown';
+          initPlayerMetric(pname);
+          const d = gameMetrics.playerData[pname];
+          d.reactionTimes.push(rt);
+          if (isFirst) d.firstBuzzCount++;
+        }
         gameState.buzzOrder.push({
           playerId: client.id,
           playerName: client.name || 'Unknown',
@@ -435,6 +560,7 @@ wss.on('connection', (ws, req) => {
         if (!client.isAdmin) return;
         gameState.buzzOrder = [];
         gameState.buzzerActive = true;
+        gameMetrics.buzzerActivatedAt = Date.now();
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -463,6 +589,10 @@ wss.on('connection', (ws, req) => {
           const row = parseInt(msg.cell?.row);
           if (!inCellBounds(col, row)) return;
           gameState.activeCell = { col, row };
+          const cellKey = `${col}-${row}`;
+          if (gameState.cells[cellKey]?.type === 'drawing' && gameState.drawingCarousel.cellKey !== cellKey) {
+            gameState.drawingCarousel = { cellKey, images: [], currentIndex: -1 };
+          }
         }
         gameState.pendingCellRequest = null;
         gameState.buzzOrder = [];
@@ -498,6 +628,7 @@ wss.on('connection', (ws, req) => {
             if (ddPlayer) {
               ddPlayer.score += gameState.dailyDoubleWager;
               playerScores[ddPlayer.name] = ddPlayer.score;
+              trackScore(ddPlayer.name, ddPlayer.score);
             }
           } else if (!isDailyDouble && gameState.buzzOrder.length > 0) {
             correctPlayerName = gameState.buzzOrder[0].playerName;
@@ -505,7 +636,10 @@ wss.on('connection', (ws, req) => {
 
           if (correctPlayerName) {
             const streakPlayer = gameState.players.find(p => p.name === correctPlayerName);
-            if (streakPlayer) streakPlayer.streak = (streakPlayer.streak || 0) + 1;
+            if (streakPlayer) {
+              streakPlayer.streak = (streakPlayer.streak || 0) + 1;
+              trackStreak(streakPlayer.name, streakPlayer.streak);
+            }
           }
         }
         gameState.activeCell = null;
@@ -521,7 +655,7 @@ wss.on('connection', (ws, req) => {
         if (!client.isAdmin) return;
         const col = parseInt(msg.col);
         const row = parseInt(msg.row);
-        if (!isFinite(col) || !isFinite(row)) return;
+        if (!inCellBounds(col, row)) return;
         const key = `${col}-${row}`;
         if (gameState.cells[key]) gameState.cells[key].answered = false;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
@@ -551,6 +685,7 @@ wss.on('connection', (ws, req) => {
               answered:    cell.answered === true,
               image:       typeof cell.image === 'string' ? cell.image : null,
               dailyDouble: gameState.cells[key]?.dailyDouble === true, // preserve via toggle_daily_double
+              type:        gameState.cells[key]?.type || 'text',       // preserve via toggle_drawing_type
             };
           }
           gameState.cells = validatedCells;
@@ -574,7 +709,7 @@ wss.on('connection', (ws, req) => {
               streak: existing?.streak || 0,
             };
           });
-        validated.forEach(p => { playerScores[p.name] = p.score; });
+        validated.forEach(p => { playerScores[p.name] = p.score; trackScore(p.name, p.score); });
         gameState.players = validated;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
@@ -596,7 +731,9 @@ wss.on('connection', (ws, req) => {
         if (!pname) return;
         if (gameState.players.find(p => p.name === pname)) return;
         const pid = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-        gameState.players.push({ id: pid, name: pname, score: playerScores[pname] || 0, streak: 0 });
+        const pstartScore = playerScores[pname] || 0;
+        gameState.players.push({ id: pid, name: pname, score: pstartScore, streak: 0 });
+        initPlayerMetric(pname, pstartScore);
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -658,6 +795,21 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      case 'show_end_screen': {
+        if (!client.isAdmin) return;
+        const endScreen = computeEndScreen();
+        gameState.finalJeopardy = { ...gameState.finalJeopardy, showEndScreen: true, endScreen };
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
+      case 'hide_end_screen': {
+        if (!client.isAdmin) return;
+        gameState.finalJeopardy = { ...gameState.finalJeopardy, showEndScreen: false, endScreen: null };
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
       case 'reset_game': {
         if (!client.isAdmin) return;
         // Record game results for logged-in players before clearing
@@ -693,7 +845,9 @@ wss.on('connection', (ws, req) => {
         gameState.pendingCellRequest = null;
         gameState.dailyDoubleWager = null;
         gameState.finalJeopardy = { category: 'Final Jeopardy', question: '', answer: '', image: null, active: false, answerRevealed: false };
+        gameState.drawingCarousel = { cellKey: null, images: [], currentIndex: -1 };
         Object.keys(playerScores).forEach(k => delete playerScores[k]);
+        gameMetrics = { buzzerActivatedAt: null, playerData: {} };
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -706,6 +860,7 @@ wss.on('connection', (ws, req) => {
         gameState.buzzOrder = [];
         gameState.buzzerActive = false;
         gameState.finalJeopardy = { ...gameState.finalJeopardy, image: null, active: false, answerRevealed: false };
+        gameState.drawingCarousel = { cellKey: null, images: [], currentIndex: -1 };
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
@@ -780,6 +935,56 @@ wss.on('connection', (ws, req) => {
         break;
       }
 
+      case 'toggle_drawing_type': {
+        if (!client.isAdmin) return;
+        const col = parseInt(msg.col);
+        const row = parseInt(msg.row);
+        if (!inCellBounds(col, row)) return;
+        const key = `${col}-${row}`;
+        if (!gameState.cells[key]) return;
+        const newType = (gameState.cells[key].type || 'text') === 'drawing' ? 'text' : 'drawing';
+        gameState.cells = { ...gameState.cells, [key]: { ...gameState.cells[key], type: newType } };
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
+      case 'upload_drawing': {
+        if (!client.name) return;
+        if (!gameState.currentSessionId) return;
+        if (!gameState.activeCell) return;
+        const activeCellKey = `${gameState.activeCell.col}-${gameState.activeCell.row}`;
+        if (gameState.cells[activeCellKey]?.type !== 'drawing') return;
+        if (gameState.drawingCarousel.images.length >= 50) return;
+        if (typeof msg.imageBase64 !== 'string' || msg.imageBase64.length > MAX_IMG_B64) return;
+        const drBuf = Buffer.from(msg.imageBase64, 'base64');
+        if (!validImageBytes(drBuf)) return;
+        const drExtMap = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/jpg': 'jpg' };
+        const drExt = drExtMap[msg.mimeType] || 'jpg';
+        const sessionDir = path.join(uploadsDir, gameState.currentSessionId);
+        const drawingsDir = path.join(sessionDir, 'drawings');
+        if (!fs.existsSync(drawingsDir)) fs.mkdirSync(drawingsDir, { recursive: true });
+        const safeName = (client.name || 'player').replace(/[^a-zA-Z0-9_\-.]/g, '_').slice(0, 20);
+        const drFilename = `${Date.now()}-${safeName}.${drExt}`;
+        fs.writeFileSync(path.join(drawingsDir, drFilename), drBuf);
+        const drUrl = `/uploads/${gameState.currentSessionId}/drawings/${drFilename}`;
+        gameState.drawingCarousel = {
+          ...gameState.drawingCarousel,
+          images: [...gameState.drawingCarousel.images, { url: drUrl, playerName: client.name }],
+        };
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
+      case 'set_carousel_index': {
+        if (!client.isAdmin) return;
+        const idx = parseInt(msg.index);
+        if (!isFinite(idx)) return;
+        if (idx !== -1 && (idx < 0 || idx >= gameState.drawingCarousel.images.length)) return;
+        gameState.drawingCarousel = { ...gameState.drawingCarousel, currentIndex: idx };
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
       // ── Turn-based cell selection ──
 
       case 'request_open_cell': {
@@ -802,6 +1007,10 @@ wss.on('connection', (ws, req) => {
         if (!gameState.pendingCellRequest) return;
         const { col, row } = gameState.pendingCellRequest;
         gameState.activeCell = { col, row };
+        const approvedKey = `${col}-${row}`;
+        if (gameState.cells[approvedKey]?.type === 'drawing' && gameState.drawingCarousel.cellKey !== approvedKey) {
+          gameState.drawingCarousel = { cellKey: approvedKey, images: [], currentIndex: -1 };
+        }
         gameState.pendingCellRequest = null;
         gameState.buzzOrder = [];
         gameState.buzzerActive = false;
@@ -876,6 +1085,7 @@ wss.on('connection', (ws, req) => {
           if (waPlayer) {
             waPlayer.score -= waDeduction;
             playerScores[waPlayer.name] = waPlayer.score;
+            trackScore(waPlayer.name, waPlayer.score);
             waPlayer.streak = 0;
           }
         }
@@ -929,7 +1139,7 @@ wss.on('connection', (ws, req) => {
         gameState.categories = [...gameState.categories, `Category ${newColIdx + 1}`];
         const newColCells = { ...gameState.cells };
         for (let r = 0; r < gameState.pointValues.length; r++) {
-          newColCells[`${newColIdx}-${r}`] = { question: '', answer: '', answered: false, image: null };
+          newColCells[`${newColIdx}-${r}`] = { question: '', answer: '', answered: false, image: null, dailyDouble: false, type: 'text' };
         }
         gameState.cells = newColCells;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
@@ -945,7 +1155,7 @@ wss.on('connection', (ws, req) => {
         gameState.pointValues = [...gameState.pointValues, lastVal + step];
         const newRowCells = { ...gameState.cells };
         for (let c = 0; c < gameState.categories.length; c++) {
-          newRowCells[`${c}-${newRowIdx}`] = { question: '', answer: '', answered: false, image: null };
+          newRowCells[`${c}-${newRowIdx}`] = { question: '', answer: '', answered: false, image: null, dailyDouble: false, type: 'text' };
         }
         gameState.cells = newRowCells;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
