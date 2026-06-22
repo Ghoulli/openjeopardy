@@ -7,6 +7,9 @@ client/dist/
 # Uploaded images (runtime data, not source)
 server/uploads/
 
+# User profile pictures (runtime data, not source)
+server/avatars/
+
 # Runtime state that may be persisted to disk
 server/game-state.json
 

@@ -8,6 +8,7 @@ import Scoreboard from './components/Scoreboard'
 import SetupView from './components/SetupView'
 import ProfileModal from './components/ProfileModal'
 import { WS_URL } from './config'
+import { useBuzzerSound } from './hooks/useBuzzerSound'
 
 export default function App() {
   const [gameState, setGameState] = useState(null)
@@ -23,6 +24,10 @@ export default function App() {
   const [playerAchievements, setPlayerAchievements] = useState([])
   const [showProfile, setShowProfile] = useState(false)
   const [newAchievements, setNewAchievements] = useState([])
+  const [playerAvatarUrl, setPlayerAvatarUrl] = useState(null)
+
+  const playBuzz = useBuzzerSound()
+  const prevBuzzLenRef = useRef(0)
 
   const notYourTurnTimer = useRef(null)
   const achToastTimer = useRef(null)
@@ -75,7 +80,11 @@ export default function App() {
           setPlayerUsername(msg.username)
           setPlayerStats(msg.stats)
           setPlayerAchievements(msg.achievements || [])
+          setPlayerAvatarUrl(msg.avatarUrl || null)
           setAuthError('')
+          break
+        case 'avatar_updated':
+          setPlayerAvatarUrl(msg.avatarUrl)
           break
         case 'stats_updated':
           setPlayerStats(msg.stats)
@@ -132,6 +141,13 @@ export default function App() {
     }
   }, [])
 
+  // Play buzzer sound when first buzz arrives
+  useEffect(() => {
+    const len = gameState?.buzzOrder?.length ?? 0
+    if (len > 0 && prevBuzzLenRef.current === 0) playBuzz()
+    prevBuzzLenRef.current = len
+  }, [gameState?.buzzOrder, playBuzz])
+
   // Spacebar buzzer — only when: focused window, not typing in an input, not admin, buzzer active
   useEffect(() => {
     const handler = e => {
@@ -172,6 +188,7 @@ export default function App() {
     setPlayerUsername(null)
     setPlayerStats(null)
     setPlayerAchievements([])
+    setPlayerAvatarUrl(null)
     setShowProfile(false)
     setNewAchievements([])
     setView('setup')
@@ -326,11 +343,14 @@ export default function App() {
           username={playerUsername}
           stats={playerStats}
           achievements={playerAchievements}
+          avatarUrl={playerAvatarUrl}
+          send={send}
           onClose={() => setShowProfile(false)}
         />
       )}
 
       <button className="profile-btn" onClick={() => setShowProfile(true)}>
+        {playerAvatarUrl && <img src={playerAvatarUrl} className="profile-btn-avatar" alt="" />}
         {playerUsername || 'Profile'}
       </button>
       <button className="leave-btn" onClick={handleLeave}>Leave</button>

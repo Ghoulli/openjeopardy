@@ -12,6 +12,9 @@ const wss = new WebSocketServer({ server });
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 
+const avatarsDir = path.join(__dirname, 'avatars');
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir);
+
 // ── Accounts ──────────────────────────────────────────────────────────────────
 const accountsFile = path.join(__dirname, 'accounts.json');
 let accounts = {};
@@ -88,8 +91,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve built client and uploads
+// Serve built client, uploads, and avatars
 app.use('/uploads', express.static(uploadsDir));
+app.use('/avatars', express.static(avatarsDir));
 app.use(express.static(path.join(__dirname, '../client/dist')));
 app.get('*', (req, res) => {
   const indexPath = path.join(__dirname, '../client/dist/index.html');
@@ -147,6 +151,14 @@ function inCellBounds(col, row) {
   return isNonNegInt(col) && isNonNegInt(row) &&
     col < gameState.categories.length &&
     row < gameState.pointValues.length;
+}
+
+// Returns canonical absolute path if avatarUrl resolves safely inside avatarsDir, else null.
+function safeAvatarPath(avatarUrl) {
+  if (typeof avatarUrl !== 'string' || !avatarUrl.startsWith('/avatars/')) return null;
+  const full = path.resolve(path.join(__dirname, avatarUrl.slice(1)));
+  if (!full.startsWith(path.resolve(avatarsDir) + path.sep)) return null;
+  return full;
 }
 
 // Returns canonical absolute path if imageUrl resolves safely inside uploadsDir, else null.
@@ -211,12 +223,14 @@ const clients = new Map();
 function joinAsPlayer(ws, client, displayName) {
   client.name = displayName;
   client.isAdmin = false;
+  const avatarUrl = (client.username && accounts[client.username]?.avatarUrl) || null;
   const existing = gameState.players.find(p => p.name === displayName);
   if (existing) {
     existing.id = client.id;
+    if (avatarUrl !== null) existing.avatarUrl = avatarUrl;
     gameState.buzzOrder.forEach(b => { if (b.playerName === displayName) b.playerId = client.id; });
   } else {
-    gameState.players.push({ id: client.id, name: displayName, score: playerScores[displayName] || 0 });
+    gameState.players.push({ id: client.id, name: displayName, score: playerScores[displayName] || 0, avatarUrl });
   }
   broadcast({ type: 'state', gameState: sanitize(gameState) });
   send(ws, { type: 'registered', id: client.id });
@@ -305,7 +319,7 @@ wss.on('connection', (ws, req) => {
         const regTok = generatePlayerToken();
         playerTokens.set(regTok, { username: uname, expiresAt: Date.now() + PLAYER_TOKEN_TTL });
         client.username = uname;
-        send(ws, { type: 'player_auth', token: regTok, username: uname, stats: accounts[uname].stats, achievements: [] });
+        send(ws, { type: 'player_auth', token: regTok, username: uname, stats: accounts[uname].stats, achievements: [], avatarUrl: null });
         joinAsPlayer(ws, client, uname);
         break;
       }
@@ -331,7 +345,7 @@ wss.on('connection', (ws, req) => {
         playerTokens.set(loginTok, { username: uname, expiresAt: Date.now() + PLAYER_TOKEN_TTL });
         client.username = uname;
         const loginAcct = accounts[uname];
-        send(ws, { type: 'player_auth', token: loginTok, username: uname, stats: loginAcct.stats, achievements: achDetails(loginAcct.achievements) });
+        send(ws, { type: 'player_auth', token: loginTok, username: uname, stats: loginAcct.stats, achievements: achDetails(loginAcct.achievements), avatarUrl: loginAcct.avatarUrl || null });
         joinAsPlayer(ws, client, uname);
         break;
       }
@@ -351,7 +365,7 @@ wss.on('connection', (ws, req) => {
         }
         client.username = uname;
         const rejoinAcct = accounts[uname];
-        send(ws, { type: 'player_auth', token: msg.token, username: uname, stats: rejoinAcct.stats, achievements: achDetails(rejoinAcct.achievements) });
+        send(ws, { type: 'player_auth', token: msg.token, username: uname, stats: rejoinAcct.stats, achievements: achDetails(rejoinAcct.achievements), avatarUrl: rejoinAcct.avatarUrl || null });
         joinAsPlayer(ws, client, uname);
         break;
       }
@@ -847,6 +861,31 @@ wss.on('connection', (ws, req) => {
           gameState.finalJeopardy = { ...gameState.finalJeopardy, image: null };
           broadcast({ type: 'state', gameState: sanitize(gameState) });
         }
+        break;
+      }
+
+      case 'upload_avatar': {
+        if (!client.username || !accounts[client.username]) return;
+        if (typeof msg.imageBase64 !== 'string' || msg.imageBase64.length > MAX_IMG_B64) return;
+        const avBuf = Buffer.from(msg.imageBase64, 'base64');
+        if (!validImageBytes(avBuf)) return;
+        const avExtMap = { 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/jpg': 'jpg' };
+        const avExt = avExtMap[msg.mimeType] || 'jpg';
+        const safeUname = client.username.replace(/[^a-zA-Z0-9_\-.]/g, '_');
+        const avFilename = `${safeUname}.${avExt}`;
+        const oldAvatarUrl = accounts[client.username].avatarUrl;
+        if (oldAvatarUrl) {
+          const oldAvFile = safeAvatarPath(oldAvatarUrl);
+          if (oldAvFile) { try { if (fs.existsSync(oldAvFile)) fs.unlinkSync(oldAvFile); } catch {} }
+        }
+        fs.writeFileSync(path.join(avatarsDir, avFilename), avBuf);
+        const newAvatarUrl = `/avatars/${avFilename}`;
+        accounts[client.username].avatarUrl = newAvatarUrl;
+        saveAccounts();
+        const avPlayer = gameState.players.find(p => p.name === client.name);
+        if (avPlayer) avPlayer.avatarUrl = newAvatarUrl;
+        send(ws, { type: 'avatar_updated', avatarUrl: newAvatarUrl });
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }
     }
