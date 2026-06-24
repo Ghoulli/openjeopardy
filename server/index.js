@@ -30,6 +30,50 @@ function saveAccounts() {
   catch (err) { console.error('Failed to save accounts:', err); }
 }
 
+// ── Game state persistence ────────────────────────────────────────────────────
+const stateFile = path.join(__dirname, 'game-state.json');
+
+// Fields that are purely transient and must not be persisted.
+const TRANSIENT_FIELDS = new Set([
+  'adminPassword', 'buzzOrder', 'buzzerActive', 'activeCell',
+  'pendingCellRequest', 'dailyDoubleWager', 'drawingCarousel',
+]);
+
+function saveState() {
+  try {
+    const toSave = {};
+    for (const [k, v] of Object.entries(gameState)) {
+      if (TRANSIENT_FIELDS.has(k)) continue;
+      if (k === 'players') {
+        // Strip live WebSocket IDs — players are re-identified on reconnect.
+        toSave.players = v.map(({ id, ...rest }) => rest);
+      } else {
+        toSave[k] = v;
+      }
+    }
+    fs.writeFileSync(stateFile, JSON.stringify(toSave));
+  } catch (err) { console.error('Failed to save state:', err); }
+}
+
+function loadState() {
+  try {
+    if (!fs.existsSync(stateFile)) return;
+    const saved = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    // Merge saved fields into gameState, skipping any transient or unknown keys.
+    for (const [k, v] of Object.entries(saved)) {
+      if (TRANSIENT_FIELDS.has(k) || k === 'adminPassword') continue;
+      if (!(k in gameState)) continue;
+      if (k === 'players') {
+        gameState.players = v.map(p => ({ ...p, id: null }));
+        // Re-hydrate playerScores so reconnecting players keep their scores.
+        for (const p of gameState.players) playerScores[p.name] = p.score;
+      } else {
+        gameState[k] = v;
+      }
+    }
+  } catch (err) { console.error('Failed to load state:', err); }
+}
+
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
 }
@@ -221,6 +265,8 @@ let gameState = {
 // Persist scores across reconnects
 const playerScores = {};
 
+loadState();
+
 // ── Game metrics (tracked within a game, reset on reset_game) ──
 let gameMetrics = {
   buzzerActivatedAt: null,
@@ -360,6 +406,7 @@ function sanitize(state) {
 }
 
 function broadcast(message) {
+  if (message.type === 'state') saveState();
   const data = JSON.stringify(message);
   for (const [ws] of clients) {
     if (ws.readyState === WebSocket.OPEN) {
