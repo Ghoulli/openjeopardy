@@ -24,7 +24,7 @@ COPY server/index.js ./server/
 # Built frontend from stage 1
 COPY --from=builder /build/client/dist ./client/dist
 
-RUN mkdir -p server/uploads
+RUN mkdir -p server/uploads server/avatars
 
 EXPOSE 3001
 

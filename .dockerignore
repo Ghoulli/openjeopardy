@@ -5,7 +5,9 @@ client/node_modules
 client/dist
 server/node_modules
 server/uploads
+server/avatars
 server/game-state.json
+server/accounts.json
 .env
 .env.*
 *.local

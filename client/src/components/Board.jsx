@@ -1,4 +1,4 @@
-export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, onUnmarkCell, myPlayerName }) {
+export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, onLockedFjClick, onUnmarkCell, myPlayerName }) {
   const { categories, pointValues, cells, activeCell, finalJeopardy, activePlayerName, pendingCellRequest } = gameState
 
   const fj = finalJeopardy || { category: 'Final Jeopardy', active: false }
@@ -71,9 +71,12 @@ export default function Board({ gameState, isAdmin, onCellClick, onFinalClick, o
           'final-jeopardy-cell',
           fj.active ? 'fj-active' : allAnswered ? 'fj-available' : 'fj-locked',
         ].join(' ')}
-        onClick={() => canLaunch && onFinalClick()}
-        disabled={!canLaunch}
-        tabIndex={canLaunch ? 0 : -1}
+        onClick={() => {
+          if (canLaunch) { onFinalClick(); return }
+          if (!isAdmin && !fj.active && onLockedFjClick) onLockedFjClick()
+        }}
+        disabled={isAdmin && !canLaunch}
+        tabIndex={isAdmin ? (canLaunch ? 0 : -1) : 0}
         aria-label="Final Jeopardy"
       >
         {fj.active

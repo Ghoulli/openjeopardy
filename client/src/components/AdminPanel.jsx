@@ -3,7 +3,7 @@ import Board from './Board'
 import BuzzerDisplay from './BuzzerDisplay'
 import QuestionModal from './QuestionModal'
 
-export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
+export default function AdminPanel({ gameState, send, onLeave, wsStatus, lockedFjClicks = [], onDismissLockedFjClick }) {
   const [tab, setTab] = useState('game')
   const [editingCell, setEditingCell] = useState(null)
   const [editQ, setEditQ] = useState('')
@@ -245,6 +245,17 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
                 </div>
               </div>
             )}
+
+            {/* Locked FJ click notifications */}
+            {lockedFjClicks.map(click => (
+              <div key={click.id} className="locked-fj-banner">
+                <span>⚠️ <strong>{click.playerName}</strong> clicked Final Jeopardy (board not done)</span>
+                <button
+                  className="admin-btn red"
+                  onClick={() => onDismissLockedFjClick?.(click.id)}
+                >Dismiss</button>
+              </div>
+            ))}
 
             {/* Turn Control */}
             {gameState.players.length > 0 && (
@@ -491,11 +502,23 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus }) {
               </div>
             </div>
 
-            <button
-              className="admin-add-row-strip"
-              title="Add row"
-              onClick={() => send({ type: 'add_row' })}
-            >+ Add Row</button>
+            <div className="admin-row-strip">
+              <button
+                className="admin-add-row-strip"
+                title="Add row"
+                onClick={() => send({ type: 'add_row' })}
+              >+ Add Row</button>
+              {gameState.pointValues.length > 1 && (
+                <button
+                  className="admin-remove-row-strip"
+                  title="Remove last row"
+                  onClick={() => {
+                    if (!confirm('Remove the last row?')) return
+                    send({ type: 'remove_row' })
+                  }}
+                >− Remove Row</button>
+              )}
+            </div>
 
             <div className="final-jeopardy-edit">
               <h3>★ Final Jeopardy</h3>

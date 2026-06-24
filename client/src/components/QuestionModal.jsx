@@ -5,7 +5,7 @@ export default function QuestionModal({
   cell, pointValue, category, isAdmin,
   buzzOrder, buzzerActive,
   onClose, onActivateBuzzer, onResetBuzzers, onStopBuzzer, onMarkAnswered,
-  isDailyDouble, dailyDoubleWager, activePlayerName, isActivePlayer,
+  isDailyDouble, dailyDoubleWager, activePlayerName, activePlayerScore, isActivePlayer,
   onSetWager, onWrongAnswer,
   drawingCarousel, onUploadDrawing, onSetCarouselIndex,
 }) {
@@ -21,8 +21,10 @@ export default function QuestionModal({
   const ddQuestionPhase = isDailyDouble && dailyDoubleWager != null
   const isDrawing = cell.type === 'drawing'
 
+  const maxWager = Math.max(activePlayerScore ?? 0, 1)
+
   function submitWager() {
-    const w = parseInt(wagerInput)
+    const w = Math.min(parseInt(wagerInput), maxWager)
     if (!isFinite(w) || w < 1) return
     onSetWager(w)
     setWagerInput('')
@@ -68,10 +70,11 @@ export default function QuestionModal({
                 className="dd-wager-input"
                 type="number"
                 min={1}
+                max={isAdmin ? undefined : maxWager}
                 value={wagerInput}
                 onChange={e => setWagerInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && submitWager()}
-                placeholder="Wager amount"
+                placeholder={isAdmin ? 'Wager amount' : `Wager (max $${maxWager.toLocaleString()})`}
                 autoFocus={isActivePlayer}
               />
               <button className="admin-btn green" onClick={submitWager}>Set Wager</button>

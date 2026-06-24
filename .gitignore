@@ -22,6 +22,8 @@ server/accounts.json
 *.local
 
 # Docker
+docker-compose.yml
+Caddyfile
 *.tar
 
 # OS / editor

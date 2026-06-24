@@ -29,6 +29,8 @@ export default function App() {
   const [playerAvatarUrl, setPlayerAvatarUrl] = useState(null)
   const [reactions, setReactions] = useState([])
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [lockedFjClicks, setLockedFjClicks] = useState([])
+  const [kickMessage, setKickMessage] = useState('')
 
   const playBuzz = useBuzzerSound()
   const prevBuzzLenRef = useRef(0)
@@ -108,6 +110,22 @@ export default function App() {
           setNewAchievements(msg.achievements)
           clearTimeout(achToastTimer.current)
           achToastTimer.current = setTimeout(() => setNewAchievements([]), 5000)
+          break
+        case 'player_click_locked_fj': {
+          const fjClickId = Date.now() + Math.random()
+          setLockedFjClicks(prev => [...prev, { id: fjClickId, playerName: msg.playerName }])
+          break
+        }
+        case 'kicked':
+          localStorage.removeItem('playerToken')
+          setPlayerId(null)
+          setPlayerUsername(null)
+          setPlayerStats(null)
+          setPlayerAchievements([])
+          setPlayerAvatarUrl(null)
+          setShowProfile(false)
+          setView('setup')
+          setKickMessage('You have been removed from the game.')
           break
         case 'error':
           if (msg.message?.includes('Session expired') || msg.message?.includes('expired')) {
@@ -227,7 +245,7 @@ export default function App() {
         onPlayerLogin={handlePlayerLogin}
         onPlayerRegister={handlePlayerRegister}
         onAdminLogin={handleAdminLogin}
-        authError={authError}
+        authError={kickMessage || authError}
         adminError={adminError}
         wsStatus={wsStatus}
       />
@@ -244,7 +262,7 @@ export default function App() {
         onPlayerLogin={handlePlayerLogin}
         onPlayerRegister={handlePlayerRegister}
         onAdminLogin={handleAdminLogin}
-        authError={authError}
+        authError={kickMessage || authError}
         adminError={adminError}
         wsStatus={wsStatus}
       />
@@ -258,6 +276,8 @@ export default function App() {
         send={send}
         onLeave={handleLeave}
         wsStatus={wsStatus}
+        lockedFjClicks={lockedFjClicks}
+        onDismissLockedFjClick={id => setLockedFjClicks(prev => prev.filter(c => c.id !== id))}
       />
     )
   }
@@ -281,27 +301,33 @@ export default function App() {
           isAdmin={false}
           onCellClick={handlePlayerCellClick}
           onFinalClick={null}
+          onLockedFjClick={() => send({ type: 'click_locked_fj' })}
           myPlayerName={playerUsername}
         />
       </div>
 
-      {/* Turn indicator */}
-      {gameState.activePlayerName && !activeCell && (
-        <div className={`turn-indicator ${isMyTurn ? 'turn-mine' : 'turn-other'}`}>
-          {isMyTurn
-            ? myPendingRequest
-              ? '⏳ Waiting for gamemaster approval…'
-              : '🎯 Your turn — pick a question!'
-            : `It's ${gameState.activePlayerName}'s turn`
-          }
-          {myPendingRequest && (
+      {/* Waiting for approval overlay — blurs board, centers message */}
+      {myPendingRequest && !activeCell && (
+        <div className="approval-wait-overlay">
+          <div className="approval-wait-bubble">
+            <div className="approval-wait-text">⏳ Waiting for gamemaster approval…</div>
             <button
               className="cancel-request-btn"
               onClick={() => send({ type: 'cancel_cell_request' })}
             >
               Cancel
             </button>
-          )}
+          </div>
+        </div>
+      )}
+
+      {/* Turn indicator (shown when NOT waiting for approval) */}
+      {gameState.activePlayerName && !activeCell && !myPendingRequest && (
+        <div className={`turn-indicator ${isMyTurn ? 'turn-mine' : 'turn-other'}`}>
+          {isMyTurn
+            ? '🎯 Your turn — pick a question!'
+            : `It's ${gameState.activePlayerName}'s turn`
+          }
         </div>
       )}
 
@@ -338,6 +364,7 @@ export default function App() {
           isDailyDouble={!!activeCellData.dailyDouble}
           dailyDoubleWager={gameState.dailyDoubleWager}
           activePlayerName={gameState.activePlayerName}
+          activePlayerScore={gameState.players.find(p => p.name === gameState.activePlayerName)?.score ?? 0}
           isActivePlayer={playerUsername === gameState.activePlayerName}
           onSetWager={wager => send({ type: 'set_daily_double_wager', wager })}
           drawingCarousel={gameState.drawingCarousel}

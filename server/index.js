@@ -709,9 +709,15 @@ wss.on('connection', (ws, req) => {
               streak: existing?.streak || 0,
             };
           });
+        const newNames = new Set(validated.map(p => p.name));
+        const kickedWs = [];
+        for (const [ws2, c] of clients) {
+          if (!c.isAdmin && c.name && !newNames.has(c.name)) kickedWs.push(ws2);
+        }
         validated.forEach(p => { playerScores[p.name] = p.score; trackScore(p.name, p.score); });
         gameState.players = validated;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
+        for (const ws2 of kickedWs) send(ws2, { type: 'kicked' });
         break;
       }
 
@@ -950,6 +956,7 @@ wss.on('connection', (ws, req) => {
 
       case 'upload_drawing': {
         if (!client.name) return;
+        if (gameState.activePlayerName && gameState.activePlayerName !== client.name) return;
         if (!gameState.currentSessionId) return;
         if (!gameState.activeCell) return;
         const activeCellKey = `${gameState.activeCell.col}-${gameState.activeCell.row}`;
@@ -1054,8 +1061,16 @@ wss.on('connection', (ws, req) => {
         if (!client.isAdmin && !isActivePlayer) return;
         const wager = parseInt(msg.wager);
         if (!isFinite(wager) || wager < 1) return;
-        gameState.dailyDoubleWager = wager;
+        const ddPlayer = gameState.players.find(p => p.name === gameState.activePlayerName);
+        const maxWager = ddPlayer ? Math.max(ddPlayer.score, 1) : 1;
+        gameState.dailyDoubleWager = Math.min(wager, maxWager);
         broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
+      case 'click_locked_fj': {
+        if (client.isAdmin || !client.name) return;
+        broadcast({ type: 'player_click_locked_fj', playerName: client.name });
         break;
       }
 
@@ -1158,6 +1173,20 @@ wss.on('connection', (ws, req) => {
           newRowCells[`${c}-${newRowIdx}`] = { question: '', answer: '', answered: false, image: null, dailyDouble: false, type: 'text' };
         }
         gameState.cells = newRowCells;
+        broadcast({ type: 'state', gameState: sanitize(gameState) });
+        break;
+      }
+
+      case 'remove_row': {
+        if (!client.isAdmin) return;
+        if (gameState.pointValues.length <= 1) return;
+        const removeRowIdx = gameState.pointValues.length - 1;
+        gameState.pointValues = gameState.pointValues.slice(0, removeRowIdx);
+        const trimmedCells = { ...gameState.cells };
+        for (let c = 0; c < gameState.categories.length; c++) {
+          delete trimmedCells[`${c}-${removeRowIdx}`];
+        }
+        gameState.cells = trimmedCells;
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;
       }

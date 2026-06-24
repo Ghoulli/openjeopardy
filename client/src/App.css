@@ -1165,6 +1165,39 @@ body {
 }
 .cancel-request-btn:hover { background: rgba(192,48,48,0.4); }
 
+/* ── Waiting for gamemaster approval overlay ── */
+.approval-wait-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  backdrop-filter: blur(4px);
+  background: rgba(5, 8, 32, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+}
+.approval-wait-bubble {
+  background: linear-gradient(135deg, #0e3a1a 0%, #0a2e10 100%);
+  border: 2px solid rgba(58,170,88,0.6);
+  border-radius: 20px;
+  padding: 1.4rem 2.4rem;
+  text-align: center;
+  box-shadow: 0 8px 36px rgba(0,0,0,0.7);
+  animation: toast-in 0.2s ease-out;
+  max-width: 420px;
+}
+.approval-wait-bubble .approval-wait-text {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #7ae89a;
+  margin-bottom: 0.8rem;
+}
+.approval-wait-bubble .cancel-request-btn {
+  font-size: 0.9rem;
+  padding: 0.35rem 1.1rem;
+}
+
 /* ── "Not your turn" toast ── */
 .not-your-turn-toast {
   position: fixed;
@@ -1238,6 +1271,42 @@ body {
   display: flex;
   gap: 0.5rem;
 }
+
+/* ── Locked FJ click notification (admin) ── */
+.locked-fj-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: rgba(80, 30, 8, 0.85);
+  border: 1px solid rgba(230, 120, 30, 0.5);
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
+  margin-bottom: 0.5rem;
+  color: #f0a060;
+  font-size: 0.9rem;
+}
+
+/* ── Admin row / remove row strip ── */
+.admin-row-strip {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 3px;
+  margin-bottom: 1.25rem;
+}
+.admin-remove-row-strip {
+  flex: 1;
+  background: rgba(120, 20, 20, 0.5);
+  border: 1px solid rgba(192,48,48,0.4);
+  color: #ee7070;
+  border-radius: 6px;
+  padding: 0.45rem 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.admin-remove-row-strip:hover { background: rgba(180, 30, 30, 0.65); }
 
 /* ── Tab badge (notification dot) ── */
 .tab-badge {
@@ -1366,7 +1435,7 @@ body {
 /* ── Add row strip below edit board grid ── */
 .admin-add-row-strip {
   display: flex;
-  width: 100%;
+  flex: 1;
   align-items: center;
   justify-content: center;
   background: rgba(13,20,80,0.5);
@@ -1377,8 +1446,6 @@ body {
   font-family: inherit;
   cursor: pointer;
   padding: 0.35rem;
-  margin-top: 3px;
-  margin-bottom: 1.25rem;
   border-radius: 0 0 4px 4px;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
@@ -1843,18 +1910,18 @@ body {
 }
 .player-reaction-bubble {
   position: absolute;
-  bottom: 105%;
+  top: 0;
   font-size: 1.5rem;
   pointer-events: none;
-  animation: reaction-float 2.8s ease-out forwards;
+  animation: reaction-drop 3s ease-in forwards;
   z-index: 200;
   line-height: 1;
 }
-@keyframes reaction-float {
-  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
-  15%  { transform: translateY(-8px) scale(1.15); opacity: 1; }
-  70%  { opacity: 1; }
-  100% { transform: translateY(-65px) scale(0.9); opacity: 0; }
+@keyframes reaction-drop {
+  0%   { transform: translateY(-10px) scale(0.7); opacity: 0; }
+  12%  { transform: translateY(0) scale(1.2); opacity: 1; }
+  60%  { opacity: 1; }
+  100% { transform: translateY(80px) scale(0.85); opacity: 0; }
 }
 
 /* ── Emoji picker ── */
