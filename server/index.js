@@ -1109,7 +1109,9 @@ wss.on('connection', (ws, req) => {
         const wager = parseInt(msg.wager);
         if (!isFinite(wager) || wager < 1) return;
         const ddPlayer = gameState.players.find(p => p.name === gameState.activePlayerName);
-        const maxWager = ddPlayer ? Math.max(ddPlayer.score, 1) : 1;
+        const ddDoublePoints = Math.max((gameState.pointValues[gameState.activeCell.row] || 0) * 2, 1);
+        const ddScore = ddPlayer ? ddPlayer.score : 0;
+        const maxWager = ddScore > 0 ? ddScore : ddDoublePoints;
         gameState.dailyDoubleWager = Math.min(wager, maxWager);
         broadcast({ type: 'state', gameState: sanitize(gameState) });
         break;

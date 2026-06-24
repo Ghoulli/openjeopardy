@@ -14,6 +14,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus, lockedF
   const [editImgFile, setEditImgFile] = useState(null) // new File selected or null
   const [editImgRemove, setEditImgRemove] = useState(false)
   const [newPlayerName, setNewPlayerName] = useState('')
+  const [bonusAmount, setBonusAmount] = useState(500)
   const [newPw, setNewPw] = useState('')
   const [newSessionName, setNewSessionName] = useState('')
   const fileInputRef = useRef(null)
@@ -681,11 +682,24 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus, lockedF
               <button className="admin-btn green" onClick={addPlayer}>Add Player</button>
             </div>
 
+            <div className="add-player-row" style={{ marginBottom: '0.75rem' }}>
+              <label style={{ color: 'rgba(245,237,218,0.7)', fontSize: '0.85rem', marginRight: '0.5rem' }}>Creativity bonus:</label>
+              <input
+                type="number"
+                className="score-input"
+                style={{ width: '6rem' }}
+                value={bonusAmount}
+                min={1}
+                onChange={e => setBonusAmount(parseInt(e.target.value) || 500)}
+              />
+            </div>
+
             <table className="players-table">
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Score</th>
+                  <th>+Bonus</th>
                   {activeCell && <th>Quick ±{activePoints}</th>}
                   <th>Actions</th>
                 </tr>
@@ -693,7 +707,7 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus, lockedF
               <tbody>
                 {gameState.players.length === 0 ? (
                   <tr>
-                    <td colSpan={4} style={{ color: 'rgba(255,255,255,0.35)', textAlign: 'center', paddingTop: '1.5rem' }}>
+                    <td colSpan={5} style={{ color: 'rgba(255,255,255,0.35)', textAlign: 'center', paddingTop: '1.5rem' }}>
                       No players yet — add them above or have them join from the main page.
                     </td>
                   </tr>
@@ -708,6 +722,16 @@ export default function AdminPanel({ gameState, send, onLeave, wsStatus, lockedF
                           value={p.score}
                           onChange={e => updateScore(p.id, e.target.value)}
                         />
+                      </td>
+                      <td>
+                        <button
+                          className="admin-btn green"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+                          onClick={() => quickScore(p.id, bonusAmount)}
+                          title={`+$${bonusAmount} creativity bonus`}
+                        >
+                          +${bonusAmount}
+                        </button>
                       </td>
                       {activeCell && (
                         <td>

@@ -21,7 +21,8 @@ export default function QuestionModal({
   const ddQuestionPhase = isDailyDouble && dailyDoubleWager != null
   const isDrawing = cell.type === 'drawing'
 
-  const maxWager = Math.max(activePlayerScore ?? 0, 1)
+  const ddDoublePoints = Math.max((pointValue || 0) * 2, 1)
+  const maxWager = (activePlayerScore ?? 0) > 0 ? activePlayerScore : ddDoublePoints
 
   function submitWager() {
     const w = Math.min(parseInt(wagerInput), maxWager)
